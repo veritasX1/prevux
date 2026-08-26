@@ -1,0 +1,77 @@
+/*
+ * ============================================================
+ * PREVUX TEXT OBJECT
+ * ============================================================
+ */
+
+.prevux-textbox {
+    background: transparent;
+    background-color: transparent;
+    background-image: none;
+
+    border: 1px solid transparent;
+
+    border-radius: 2px;
+
+    padding: 0;
+    margin: 0;
+}
+
+.prevux-textbox.selected {
+    background: transparent;
+    background-color: transparent;
+    background-image: none;
+
+    border: 1px solid #3584e4;
+}
+
+.prevux-textbox.selected:focus-within {
+    background: transparent;
+    background-color: transparent;
+    background-image: none;
+
+    border: 1px solid #3584e4;
+}
+
+
+/*
+ * ============================================================
+ * GTK TEXT VIEW
+ * ============================================================
+ */
+
+.prevux-text-editor {
+    background: transparent;
+    background-color: transparent;
+    background-image: none;
+
+    border: none;
+    box-shadow: none;
+
+    padding: 0;
+    margin: 0;
+}
+
+.prevux-text-editor text {
+    background: transparent;
+    background-color: transparent;
+    background-image: none;
+}
+
+.prevux-text-editor viewport {
+    background: transparent;
+    background-color: transparent;
+    background-image: none;
+}
+
+
+/*
+ * Text tool state.
+ *
+ * No cursor property here because GTK CSS does not support
+ * the normal web CSS "cursor:" property.
+ */
+
+.text-mode {
+    background: transparent;
+}
