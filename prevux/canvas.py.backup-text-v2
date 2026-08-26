@@ -1,6 +1,7 @@
 import gi
 
 gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
 gi.require_version("GdkPixbuf", "2.0")
 
 from gi.repository import Gtk, GdkPixbuf
@@ -23,40 +24,45 @@ class ZoomCanvas(Gtk.ScrolledWindow):
 
         self.pixbuf = None
 
+        # --------------------------------------------------
+        # Fixed canvas
+        # --------------------------------------------------
+
         self.canvas = Gtk.Fixed()
 
-        self.set_child(
-            self.canvas
-        )
+        self.set_child(self.canvas)
+
+        # --------------------------------------------------
+        # Image
+        # --------------------------------------------------
 
         self.picture = Gtk.Picture()
 
-        self.picture.set_can_shrink(
-            True
-        )
+        self.picture.set_can_shrink(True)
 
         self.canvas.put(
             self.picture,
             0,
-            0
+            0,
         )
+
+        # --------------------------------------------------
+        # Text / annotation overlay
+        # --------------------------------------------------
 
         self.overlay = Gtk.Fixed()
 
         self.canvas.put(
             self.overlay,
             0,
-            0
+            0,
         )
 
-    # ========================================================
+    # ======================================================
     # IMAGE
-    # ========================================================
+    # ======================================================
 
-    def set_pixbuf(
-        self,
-        pixbuf
-    ):
+    def set_pixbuf(self, pixbuf):
 
         self.pixbuf = pixbuf
 
@@ -70,23 +76,17 @@ class ZoomCanvas(Gtk.ScrolledWindow):
 
         self.update_image()
 
-    def set_png(
-        self,
-        path
-    ):
+    def set_png(self, path):
 
-        pixbuf = (
-            GdkPixbuf.Pixbuf
-            .new_from_file(path)
+        pixbuf = GdkPixbuf.Pixbuf.new_from_file(
+            path
         )
 
-        self.set_pixbuf(
-            pixbuf
-        )
+        self.set_pixbuf(pixbuf)
 
-    # ========================================================
-    # DISPLAY
-    # ========================================================
+    # ======================================================
+    # ZOOM
+    # ======================================================
 
     def update_image(self):
 
@@ -98,7 +98,7 @@ class ZoomCanvas(Gtk.ScrolledWindow):
             int(
                 self.original_width
                 * self.zoom
-            )
+            ),
         )
 
         height = max(
@@ -106,13 +106,13 @@ class ZoomCanvas(Gtk.ScrolledWindow):
             int(
                 self.original_height
                 * self.zoom
-            )
+            ),
         )
 
         scaled = self.pixbuf.scale_simple(
             width,
             height,
-            GdkPixbuf.InterpType.BILINEAR
+            GdkPixbuf.InterpType.BILINEAR,
         )
 
         self.picture.set_pixbuf(
@@ -121,22 +121,18 @@ class ZoomCanvas(Gtk.ScrolledWindow):
 
         self.picture.set_size_request(
             width,
-            height
+            height,
         )
 
         self.overlay.set_size_request(
             width,
-            height
+            height,
         )
 
         self.canvas.set_size_request(
             width,
-            height
+            height,
         )
-
-    # ========================================================
-    # FIT
-    # ========================================================
 
     def fit(self):
 
@@ -147,36 +143,32 @@ class ZoomCanvas(Gtk.ScrolledWindow):
 
         available_width = max(
             1,
-            allocation.width
+            allocation.width,
         )
 
         available_height = max(
             1,
-            allocation.height
+            allocation.height,
         )
 
-        horizontal = (
+        horizontal_zoom = (
             available_width
             / self.original_width
         )
 
-        vertical = (
+        vertical_zoom = (
             available_height
             / self.original_height
         )
 
         self.fit_zoom = min(
-            horizontal,
-            vertical
+            horizontal_zoom,
+            vertical_zoom,
         )
 
         self.zoom = self.fit_zoom
 
         self.update_image()
-
-    # ========================================================
-    # ACTUAL SIZE
-    # ========================================================
 
     def actual(self):
 
@@ -184,14 +176,13 @@ class ZoomCanvas(Gtk.ScrolledWindow):
 
         self.update_image()
 
-    # ========================================================
-    # ZOOM STEP
-    # ========================================================
+    def step_zoom(self, direction):
 
-    def step_zoom(
-        self,
-        direction
-    ):
+        factors = (
+            1.15,
+            1.30,
+            1.50,
+        )
 
         if direction > 0:
 
@@ -205,37 +196,34 @@ class ZoomCanvas(Gtk.ScrolledWindow):
             0.05,
             min(
                 self.zoom,
-                20.0
-            )
+                20.0,
+            ),
         )
 
         self.update_image()
 
-    # ========================================================
-    # TEXT BOXES
-    # ========================================================
+    # ======================================================
+    # TEXT OBJECTS
+    # ======================================================
 
     def add_text_box(
         self,
         textbox,
         x,
-        y
+        y,
     ):
 
         self.overlay.put(
             textbox,
             int(x),
-            int(y)
+            int(y),
         )
 
-        textbox.set_visible(
-            True
-        )
+        textbox.set_visible(True)
 
-    def remove_text_box(
-        self,
-        textbox
-    ):
+        textbox.begin_edit()
+
+    def remove_text_box(self, textbox):
 
         self.overlay.remove(
             textbox
@@ -245,20 +233,41 @@ class ZoomCanvas(Gtk.ScrolledWindow):
 
         result = []
 
-        child = (
-            self.overlay
-            .get_first_child()
-        )
+        child = self.overlay.get_first_child()
 
         while child is not None:
 
-            result.append(
-                child
-            )
+            result.append(child)
 
-            child = (
-                child
-                .get_next_sibling()
-            )
+            child = child.get_next_sibling()
 
         return result
+
+    # ======================================================
+    # SCALE
+    # ======================================================
+
+    def image_to_canvas(
+        self,
+        image_x,
+        image_y,
+    ):
+
+        return (
+            image_x * self.zoom,
+            image_y * self.zoom,
+        )
+
+    def canvas_to_image(
+        self,
+        canvas_x,
+        canvas_y,
+    ):
+
+        if self.zoom == 0:
+            return 0, 0
+
+        return (
+            canvas_x / self.zoom,
+            canvas_y / self.zoom,
+        )

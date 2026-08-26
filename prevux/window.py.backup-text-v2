@@ -13,6 +13,7 @@ from .canvas import ZoomCanvas
 from .document import Document
 from .image_document import ImageDocument
 from .pdf_document import PDFDocument
+from .dialogs import TextDialog
 from .text_tools import TextTool
 
 
@@ -206,6 +207,7 @@ class PrevuxWindow(Gtk.ApplicationWindow):
             "Tools",
             [
                 ("Markup", self.toggle_markup),
+                ("Add Text…", self.add_text),
                 (
                     "Crop…",
                     lambda: self.message(
@@ -754,17 +756,6 @@ class PrevuxWindow(Gtk.ApplicationWindow):
             ]
         )
 
-        font.connect(
-            "notify::selected",
-            lambda dropdown, _param:
-            self.format_selected_text(
-                "font",
-                dropdown.get_selected_item().get_string()
-                if dropdown.get_selected_item() is not None
-                else "Sans"
-            )
-        )
-
         box.append(font)
 
         size_label = Gtk.Label(label="Size")
@@ -780,15 +771,6 @@ class PrevuxWindow(Gtk.ApplicationWindow):
 
         size.set_value(32)
 
-        size.connect(
-            "value-changed",
-            lambda spin:
-            self.format_selected_text(
-                "size",
-                spin.get_value()
-            )
-        )
-
         box.append(size)
 
         style_row = Gtk.Box(
@@ -797,41 +779,9 @@ class PrevuxWindow(Gtk.ApplicationWindow):
         )
 
         bold = Gtk.ToggleButton(label="B")
-
-        bold.connect(
-            "toggled",
-            lambda button: self.format_selected_text(
-                "bold",
-                button.get_active()
-            )
-        )
         italic = Gtk.ToggleButton(label="I")
-
-        italic.connect(
-            "toggled",
-            lambda button: self.format_selected_text(
-                "italic",
-                button.get_active()
-            )
-        )
         underline = Gtk.ToggleButton(label="U")
-
-        underline.connect(
-            "toggled",
-            lambda button: self.format_selected_text(
-                "underline",
-                button.get_active()
-            )
-        )
         strike = Gtk.ToggleButton(label="S")
-
-        strike.connect(
-            "toggled",
-            lambda button: self.format_selected_text(
-                "strike",
-                button.get_active()
-            )
-        )
 
         for button in (
             bold,
@@ -882,34 +832,18 @@ class PrevuxWindow(Gtk.ApplicationWindow):
             label="Border"
         )
 
-        border.connect(
-            "toggled",
-            lambda button:
-            self.format_selected_text(
-                "border",
-                button.get_active()
-            )
-        )
-
         box.append(border)
 
-        border_color = Gtk.ColorDialogButton()
-
-        border_color.set_dialog(
-            Gtk.ColorDialog()
-        )
-
-        border_color.set_tooltip_text(
-            "Border Color"
+        border_color = Gtk.Button(
+            label="Border Color…"
         )
 
         border_color.connect(
-            "notify::rgba",
-            lambda button, _param:
-            self.format_selected_text(
-                "border-color",
-                button.get_rgba()
-            )
+            "clicked",
+            lambda _button:
+            self.message(
+                "Border color palette."
+            ),
         )
 
         box.append(border_color)
@@ -1305,84 +1239,6 @@ class PrevuxWindow(Gtk.ApplicationWindow):
         self.zoom_label.set_text("100%")
 
     # ========================================================
-    # TEXT FORMATTING
-    # ========================================================
-
-    def get_active_text_box(self):
-
-        textbox = getattr(
-            self,
-            "active_text_box",
-            None
-        )
-
-        if textbox is None:
-            return None
-
-        return textbox
-
-    def format_selected_text(
-        self,
-        action,
-        value=None
-    ):
-
-        textbox = self.get_active_text_box()
-
-        if textbox is None:
-            return
-
-        if action == "bold":
-
-            textbox.apply_bold(
-                bool(value)
-            )
-
-        elif action == "italic":
-
-            textbox.apply_italic(
-                bool(value)
-            )
-
-        elif action == "underline":
-
-            textbox.apply_underline(
-                bool(value)
-            )
-
-        elif action == "strike":
-
-            textbox.apply_strikethrough(
-                bool(value)
-            )
-
-        elif action == "size":
-
-            textbox.apply_font_size(
-                value
-            )
-
-        elif action == "font":
-
-            textbox.apply_font_family(
-                value
-            )
-
-        elif action == "text-color":
-
-            textbox.apply_text_color(
-                value
-            )
-
-        elif action == "background-color":
-
-            textbox.apply_background_color(
-                value
-            )
-
-        self.unsaved_changes = True
-
-    # ========================================================
     # TEXT
     # ========================================================
 
@@ -1396,6 +1252,184 @@ class PrevuxWindow(Gtk.ApplicationWindow):
 
         self.text_tool.activate()
 
+    def add_text(self):
+
+
+        if not isinstance(
+            self.current,
+            ImageDocument,
+        ):
+
+            self.message(
+                "Text annotations for PDFs are next."
+            )
+
+            return
+
+        dialog = TextDialog(self)
+
+        dialog.connect(
+            "response",
+            self.text_response,
+        )
+
+        dialog.present()
+
+    def text_response(
+        self,
+        dialog,
+        response,
+    ):
+
+        if (
+            response == Gtk.ResponseType.OK
+            and dialog.text.get_text()
+        ):
+
+            from PIL import ImageDraw, ImageFont
+
+            text = dialog.text.get_text()
+
+            image = self.current.image
+
+            draw = ImageDraw.Draw(image)
+
+            size = int(
+                dialog.size.get_value()
+            )
+
+            font_path = (
+                "/usr/share/fonts/"
+                "truetype/dejavu/"
+                "DejaVuSans.ttf"
+            )
+
+            if dialog.bold.get_active():
+
+                font_path = (
+                    "/usr/share/fonts/"
+                    "truetype/dejavu/"
+                    "DejaVuSans-Bold.ttf"
+                )
+
+            try:
+
+                font = ImageFont.truetype(
+                    font_path,
+                    size,
+                )
+
+            except Exception:
+
+                font = ImageFont.load_default()
+
+            x = 50
+            y = 50
+
+            if dialog.background.get_active():
+
+                bounds = draw.textbbox(
+                    (x, y),
+                    text,
+                    font=font,
+                )
+
+                padding = max(
+                    6,
+                    size // 5,
+                )
+
+                draw.rounded_rectangle(
+                    (
+                        bounds[0] - padding,
+                        bounds[1] - padding,
+                        bounds[2] + padding,
+                        bounds[3] + padding,
+                    ),
+                    radius=max(
+                        2,
+                        padding // 2,
+                    ),
+                    fill=(0, 0, 0, 170),
+                )
+
+            outline_width = 0
+
+            if dialog.outline.get_active():
+
+                outline_width = int(
+                    dialog.outline_width.get_value()
+                )
+
+            draw.text(
+                (x, y),
+                text,
+                font=font,
+                fill="white",
+                stroke_width=outline_width,
+                stroke_fill="black",
+            )
+
+            if dialog.underline.get_active():
+
+                bounds = draw.textbbox(
+                    (x, y),
+                    text,
+                    font=font,
+                )
+
+                draw.line(
+                    (
+                        bounds[0],
+                        bounds[3] + 3,
+                        bounds[2],
+                        bounds[3] + 3,
+                    ),
+                    fill="white",
+                    width=max(
+                        1,
+                        size // 15,
+                    ),
+                )
+
+            self.load_image()
+
+            self.message("Text added.")
+
+        dialog.destroy()
+
+    # ========================================================
+    # PDF NOTE / HIGHLIGHT
+    # ========================================================
+
+    def add_note(self):
+
+        if not isinstance(
+            self.current,
+            PDFDocument,
+        ):
+
+            self.message(
+                "Notes are available for PDFs."
+            )
+
+            return
+
+        self.message(
+            "PDF note tool selected — "
+            "annotation engine next."
+        )
+
+    def highlight_pdf(self):
+
+        self.message(
+            "PDF highlighter — "
+            "annotation engine next."
+        )
+
+    # ========================================================
+    # SAVE
+    # ========================================================
 
     def save(self):
 
@@ -1411,49 +1445,38 @@ class PrevuxWindow(Gtk.ApplicationWindow):
 
             self.current.save()
 
-            self.message(
-                "Saved."
-            )
+            self.message("Saved.")
 
         except Exception as error:
 
-            self.show_error(
-                str(error)
-            )
-
+            self.show_error(str(error))
 
     def save_as(self):
 
         if self.current is None:
-
             return
 
         dialog = Gtk.FileDialog()
 
-        dialog.set_title(
-            "Save As…"
-        )
+        dialog.set_title("Save As…")
 
         dialog.save(
             self,
             None,
-            self.save_as_finished
+            self.save_as_finished,
         )
-
 
     def save_as_finished(
         self,
         dialog,
-        result
+        result,
     ):
 
         try:
 
             file = (
                 dialog
-                .save_finish(
-                    result
-                )
+                .save_finish(result)
             )
 
         except GLib.Error:
@@ -1461,7 +1484,6 @@ class PrevuxWindow(Gtk.ApplicationWindow):
             return
 
         if file is None:
-
             return
 
         try:
@@ -1470,80 +1492,45 @@ class PrevuxWindow(Gtk.ApplicationWindow):
                 file.get_path()
             )
 
-            self.message(
-                "Saved."
-            )
+            self.message("Saved.")
 
         except Exception as error:
 
-            self.show_error(
-                str(error)
-            )
+            self.show_error(str(error))
 
-
-    def add_note(self):
-
-        if self.current is None:
-            self.message(
-                "Open an image or PDF first."
-            )
-            return
-
-        if not isinstance(
-            self.current,
-            PDFDocument,
-        ):
-            self.message(
-                "Notes are available for PDF documents."
-            )
-            return
-
-        self.message(
-            "Click on the PDF to place a note."
-        )
+    # ========================================================
+    # SHORTCUTS
+    # ========================================================
 
     def install_shortcuts(self):
 
         controller = Gtk.ShortcutController()
 
         shortcuts = [
-            (
-                "<Control>o",
-                self.open_files
-            ),
-            (
-                "<Control>s",
-                self.save
-            ),
-            (
-                "<Control>0",
-                self.actual_size
-            ),
-            (
-                "<Control>1",
-                self.fit
-            )
+            ("<Control>o", self.open_files),
+            ("<Control>s", self.save),
+            ("<Control>0", self.actual_size),
+            ("<Control>1", self.fit),
         ]
 
         for key, callback in shortcuts:
 
             controller.add_shortcut(
                 Gtk.Shortcut.new(
-                    Gtk.ShortcutTrigger.parse_string(
-                        key
-                    ),
+                    Gtk.ShortcutTrigger.parse_string(key),
                     Gtk.CallbackAction.new(
                         lambda *args,
                         function=callback:
                         function()
-                    )
+                    ),
                 )
             )
 
-        self.add_controller(
-            controller
-        )
+        self.add_controller(controller)
 
+    # ========================================================
+    # STATUS / ERROR
+    # ========================================================
 
     def message(self, text):
 
