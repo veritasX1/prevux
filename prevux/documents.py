@@ -477,6 +477,21 @@ class PDFDocument(BaseDocument):
                 results.append((index, (rect.x0, rect.y0, rect.x1, rect.y1)))
         return results
 
+    def snippet(self, index, rect, limit=90):
+        """The text line around a search hit, for the results list."""
+        x0, y0, x1, y1 = rect
+        middle = (y0 + y1) / 2
+        words = self.page_words(index)
+        line = None
+        for wx0, wy0, wx1, wy1, _text, block, number in words:
+            if wy0 <= middle <= wy1 and wx1 >= x0 - 1 and wx0 <= x1 + 1:
+                line = (block, number)
+                break
+        if line is None:
+            return ""
+        text = " ".join(word[4] for word in words if (word[5], word[6]) == line)
+        return text if len(text) <= limit else text[:limit].rstrip() + "…"
+
     # --- structure --------------------------------------------
 
     def structure_data(self):

@@ -14,10 +14,29 @@ from .i18n import _
 THUMBNAIL_SIZE = 120
 
 
+def highlight_markup(text, pattern):
+    """Escape text for Pango markup and make the search term bold."""
+    if not pattern:
+        return GLib.markup_escape_text(text)
+    parts = []
+    lowered = text.lower()
+    position = 0
+    while True:
+        found = lowered.find(pattern, position)
+        if found < 0:
+            parts.append(GLib.markup_escape_text(text[position:]))
+            break
+        parts.append(GLib.markup_escape_text(text[position:found]))
+        parts.append("<b>" + GLib.markup_escape_text(text[found:found + len(pattern)]) + "</b>")
+        position = found + len(pattern)
+    return "".join(parts)
+
+
 class PageRow(Gtk.ListBoxRow):
 
     def __init__(self, doc_index, page):
         super().__init__()
+        self.add_css_class("page-row")
         self.doc_index = doc_index
         self.page = page
 
@@ -56,6 +75,7 @@ class Sidebar(Gtk.Box):
         "move-page": (GObject.SignalFlags.RUN_FIRST, None, (int, int, int)),
         "delete-pages": (GObject.SignalFlags.RUN_FIRST, None, ()),
         "outline-activated": (GObject.SignalFlags.RUN_FIRST, None, (int, float)),
+        "search-activated": (GObject.SignalFlags.RUN_FIRST, None, (int,)),
     }
 
     def __init__(self):
@@ -100,6 +120,23 @@ class Sidebar(Gtk.Box):
         self.stack.add_named(self.scroller, "thumbnails")
         self.stack.add_named(contents_scroller, "contents")
         self.stack.add_named(self.no_contents, "no-contents")
+
+        # Search results, as in Preview's sidebar while searching.
+        search_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.search_count = Gtk.Label(xalign=0)
+        self.search_count.add_css_class("dim-label")
+        self.search_count.add_css_class("caption-heading")
+        self.search_count.set_margin_start(12)
+        self.search_count.set_margin_top(8)
+        self.search_count.set_margin_bottom(4)
+        search_box.append(self.search_count)
+        self.results = Gtk.ListBox()
+        self.results.add_css_class("navigation-sidebar")
+        self.results.connect("row-activated", self.on_result_activated)
+        results_scroller = Gtk.ScrolledWindow(vexpand=True, child=self.results)
+        results_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        search_box.append(results_scroller)
+        self.stack.add_named(search_box, "search")
         self.append(self.stack)
         self.mode = "thumbnails"
         self.contents_doc = None
@@ -250,6 +287,57 @@ class Sidebar(Gtk.Box):
             row.target = (page, y)
             self.contents.append(row)
         self.stack.set_visible_child_name("contents")
+
+    def show_results(self, results, snippets, query):
+        self.results.remove_all()
+        count = len(results)
+        self.search_count.set_text(
+            _("1 result") if count == 1 else _("{count} results").format(count=count)
+        )
+        pattern = query.lower()
+        for (page, _rect), snippet in zip(results, snippets):
+            row = Gtk.ListBoxRow()
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            box.set_margin_top(4)
+            box.set_margin_bottom(4)
+            label = Gtk.Label(xalign=0, wrap=True, lines=3, ellipsize=3)
+            label.set_markup(highlight_markup(snippet, pattern))
+            page_label = Gtk.Label(
+                label=_("Page {page}").format(page=page + 1), xalign=0,
+            )
+            page_label.add_css_class("dim-label")
+            page_label.add_css_class("caption")
+            box.append(label)
+            box.append(page_label)
+            row.set_child(box)
+            self.results.append(row)
+        self.stack.set_visible_child_name("search")
+
+    def select_result(self, index):
+        row = self.results.get_row_at_index(index)
+        if row is not None:
+            self.results.select_row(row)
+            GLib.idle_add(self.scroll_row_into_view, self.results, row)
+
+    def scroll_row_into_view(self, listbox, row):
+        scroller = listbox.get_ancestor(Gtk.ScrolledWindow)
+        found, bounds = row.compute_bounds(listbox)
+        if found and scroller is not None:
+            adjustment = scroller.get_vadjustment()
+            top = bounds.get_y()
+            bottom = top + bounds.get_height()
+            if top < adjustment.get_value():
+                adjustment.set_value(top)
+            elif bottom > adjustment.get_value() + adjustment.get_page_size():
+                adjustment.set_value(bottom - adjustment.get_page_size())
+        return False
+
+    def hide_results(self):
+        self.results.remove_all()
+        self.set_mode(self.mode, self.contents_doc)
+
+    def on_result_activated(self, listbox, row):
+        self.emit("search-activated", row.get_index())
 
     def on_contents_activated(self, listbox, row):
         page, y = row.target

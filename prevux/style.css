@@ -54,13 +54,14 @@ textview.note-editor {
   background: none;
 }
 
-.thumbnail-sidebar row {
+.thumbnail-sidebar row.page-row {
   border-radius: 8px;
   margin: 2px 6px;
   padding: 0;
 }
 
-.thumbnail-sidebar row:selected {
+.thumbnail-sidebar row.page-row:selected,
+.thumbnail-sidebar row.page-row:hover {
   background-color: transparent;
 }
 

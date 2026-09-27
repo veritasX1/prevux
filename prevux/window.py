@@ -62,6 +62,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.force_close = False
         self.highlight_choice = ("highlight", HIGHLIGHT_COLORS[0][1])
         self.search_results = []
+        self.sidebar_before_search = None
         self.adjusting = None
 
         self.build_ui()
@@ -96,6 +97,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.sidebar = Sidebar()
         self.sidebar.connect("page-activated", self.on_page_activated)
         self.sidebar.connect("move-page", self.on_move_page)
+        self.sidebar.connect("search-activated", self.on_search_result)
         self.sidebar.connect(
             "outline-activated", lambda _sidebar, page, y: self.view.scroll_to_page(page, y),
         )
@@ -142,6 +144,8 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.search_entry.set_size_request(170, -1)
         self.search_entry.connect("search-changed", self.on_search_changed)
         self.search_entry.connect("activate", lambda _entry: self.search_step(1))
+        self.search_entry.connect("next-match", lambda _entry: self.search_step(1))
+        self.search_entry.connect("previous-match", lambda _entry: self.search_step(-1))
         self.search_entry.connect("stop-search", self.on_stop_search)
         self.search_slot = slot(self.search_entry)
         end_items.append(self.search_slot)
@@ -1210,14 +1214,30 @@ class PrevuxWindow(Adw.ApplicationWindow):
             self.view.search_hits = []
             self.view.search_current = -1
             self.view.queue_draw()
+            self.end_search_sidebar()
             return
-        self.view.search_hits = doc.search(text)
+        hits = doc.search(text)
+        self.view.search_hits = hits
         self.view.search_current = -1
-        if self.view.search_hits:
+
+        # Show the results in the sidebar; restore it when the search ends.
+        if self.sidebar_before_search is None:
+            self.sidebar_before_search = self.split.get_show_sidebar()
+        snippets = [doc.snippet(page, rect) for page, rect in hits[:500]]
+        self.sidebar.show_results(hits[:500], snippets, text)
+        self.split.set_show_sidebar(True)
+
+        if hits:
             self.search_step(1)
         else:
             self.view.queue_draw()
-            self.toast(_("No results"))
+
+    def end_search_sidebar(self):
+        if self.sidebar_before_search is None:
+            return
+        self.sidebar.hide_results()
+        self.split.set_show_sidebar(self.sidebar_before_search)
+        self.sidebar_before_search = None
 
     def search_step(self, direction):
         hits = self.view.search_hits
@@ -1227,6 +1247,11 @@ class PrevuxWindow(Adw.ApplicationWindow):
         page, rect = hits[self.view.search_current]
         self.view.scroll_to_page(page, rect[1])
         self.view.queue_draw()
+        self.sidebar.select_result(self.view.search_current)
+
+    def on_search_result(self, sidebar, index):
+        self.view.search_current = index - 1
+        self.search_step(1)
 
     def focus_search(self):
         if self.search_slot.get_visible():
