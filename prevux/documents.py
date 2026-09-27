@@ -451,6 +451,23 @@ class PDFDocument(BaseDocument):
             self.words[index] = words
         return self.words[index]
 
+    def outline(self):
+        """Table of contents as (level, title, page, y) in display space."""
+        result = []
+        for entry in self.doc.get_toc(simple=False):
+            level, title, number = entry[:3]
+            page = number - 1
+            if not 0 <= page < self.page_count:
+                continue
+            y = 0.0
+            destination = entry[3] if len(entry) > 3 else {}
+            point = destination.get("to") if isinstance(destination, dict) else None
+            if point is not None:
+                page_object = self.doc[page]
+                y = max(0.0, (pymupdf.Point(point) * page_object.rotation_matrix).y)
+            result.append((level, title, page, y))
+        return result
+
     def search(self, text):
         results = []
         for index, page in enumerate(self.doc):

@@ -28,6 +28,7 @@ ACCELERATORS = {
     "win.find": ["<Control>f"],
     "win.hide-sidebar": ["<Control><Alt>1"],
     "win.show-sidebar": ["<Control><Alt>2"],
+    "win.show-contents": ["<Control><Alt>3"],
     "win.actual-size": ["<Control>0"],
     "win.zoom-fit": ["<Control>9"],
     "win.zoom-in": ["<Control>plus", "<Control>equal", "<Control>KP_Add"],

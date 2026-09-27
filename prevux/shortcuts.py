@@ -28,6 +28,7 @@ SECTIONS = [
     ("View", [
         ("Content Only", "<Control><Alt>1"),
         ("Thumbnails", "<Control><Alt>2"),
+        ("Table of Contents", "<Control><Alt>3"),
         ("Actual Size", "<Control>0"),
         ("Zoom to Fit", "<Control>9"),
         ("Zoom In", "<Control>plus"),

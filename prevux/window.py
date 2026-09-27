@@ -96,6 +96,9 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.sidebar = Sidebar()
         self.sidebar.connect("page-activated", self.on_page_activated)
         self.sidebar.connect("move-page", self.on_move_page)
+        self.sidebar.connect(
+            "outline-activated", lambda _sidebar, page, y: self.view.scroll_to_page(page, y),
+        )
         self.sidebar.connect("delete-pages", lambda *_args: self.activate_action("win.delete-pages"))
         sidebar_view.set_content(self.sidebar)
         self.split.set_sidebar(sidebar_view)
@@ -348,6 +351,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
                 section(
                     (_("Content Only"), "win.hide-sidebar", "<Control><Alt>1"),
                     (_("Thumbnails"), "win.show-sidebar", "<Control><Alt>2"),
+                    (_("Table of Contents"), "win.show-contents", "<Control><Alt>3"),
                 ),
                 section(
                     (_("Actual Size"), "win.actual-size", "<Control>0"),
@@ -445,7 +449,8 @@ class PrevuxWindow(Adw.ApplicationWindow):
             "insert-blank-page": self.insert_blank_page,
             "delete-pages": self.delete_pages,
             "hide-sidebar": lambda: self.split.set_show_sidebar(False),
-            "show-sidebar": lambda: self.split.set_show_sidebar(True),
+            "show-sidebar": lambda: self.show_sidebar_mode("thumbnails"),
+            "show-contents": lambda: self.show_sidebar_mode("contents"),
             "actual-size": lambda: self.view.set_zoom(1.0),
             "zoom-fit": lambda: self.view.zoom_to_fit("page"),
             "zoom-width": lambda: self.view.zoom_to_fit("width"),
@@ -703,6 +708,8 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.search_results = []
         self.search_entry.set_text("")
         self.sidebar.select_page(index, 0)
+        if self.sidebar.mode == "contents":
+            self.sidebar.fill_contents(doc)
         self.update_state()
 
     def ask_password(self, path):
@@ -1146,6 +1153,10 @@ class PrevuxWindow(Adw.ApplicationWindow):
     # ========================================================
     # NAVIGATION
     # ========================================================
+
+    def show_sidebar_mode(self, mode):
+        self.sidebar.set_mode(mode, self.doc)
+        self.split.set_show_sidebar(True)
 
     def go_page(self, page):
         doc = self.doc
