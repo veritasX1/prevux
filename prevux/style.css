@@ -87,8 +87,12 @@ textview.note-editor {
   padding: 0 7px;
 }
 
-.thumbnail-sidebar row.drop-target {
+.thumbnail-sidebar row.drop-before {
   box-shadow: inset 0 3px 0 @accent_bg_color;
+}
+
+.thumbnail-sidebar row.drop-after {
+  box-shadow: inset 0 -3px 0 @accent_bg_color;
 }
 
 /* Color swatches */

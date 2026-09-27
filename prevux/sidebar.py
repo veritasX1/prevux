@@ -72,7 +72,7 @@ class Sidebar(Gtk.Box):
 
     __gsignals__ = {
         "page-activated": (GObject.SignalFlags.RUN_FIRST, None, (int, int)),
-        "move-page": (GObject.SignalFlags.RUN_FIRST, None, (int, int, int)),
+        "drop-page": (GObject.SignalFlags.RUN_FIRST, None, (str, int, int)),
         "delete-pages": (GObject.SignalFlags.RUN_FIRST, None, ()),
         "outline-activated": (GObject.SignalFlags.RUN_FIRST, None, (int, float)),
         "search-activated": (GObject.SignalFlags.RUN_FIRST, None, (int,)),
@@ -86,6 +86,7 @@ class Sidebar(Gtk.Box):
         self.pending = []
         self.render_source = None
         self.updating = False
+        self.owner_id = str(id(self))
 
         self.list = Gtk.ListBox()
         self.list.set_selection_mode(Gtk.SelectionMode.MULTIPLE)
@@ -181,8 +182,7 @@ class Sidebar(Gtk.Box):
             for page in range(doc.page_count):
                 row = PageRow(doc_index, page)
                 row.set_size(*doc.page_size(page))
-                if doc.kind == "pdf":
-                    self.setup_drag(row)
+                self.setup_drag(row, accept=doc.kind == "pdf")
                 self.list.append(row)
                 self.rows[(doc_index, page)] = row
                 self.pending.append((doc_index, page))
@@ -374,20 +374,29 @@ class Sidebar(Gtk.Box):
     # DRAG AND DROP
     # ========================================================
 
-    def setup_drag(self, row):
-        source = Gtk.DragSource(actions=Gdk.DragAction.MOVE)
+    def setup_drag(self, row, accept):
+        source = Gtk.DragSource(actions=Gdk.DragAction.MOVE | Gdk.DragAction.COPY)
         source.connect("prepare", self.on_drag_prepare, row)
         source.connect("drag-begin", self.on_drag_begin, row)
         row.add_controller(source)
 
-        target = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE)
+        if not accept:
+            return
+        target = Gtk.DropTarget.new(
+            GObject.TYPE_STRING, Gdk.DragAction.MOVE | Gdk.DragAction.COPY,
+        )
+        target.set_preload(True)
         target.connect("drop", self.on_drop, row)
         target.connect("motion", self.on_drop_motion, row)
-        target.connect("leave", lambda *_args: row.remove_css_class("drop-target"))
+        target.connect("leave", lambda *_args: self.clear_drop_marks(row))
         row.add_controller(target)
 
+    def drag_key(self, row):
+        # Identifies the page across windows of this application.
+        return f"{self.owner_id}:{row.doc_index}:{row.page}"
+
     def on_drag_prepare(self, source, x, y, row):
-        value = GObject.Value(GObject.TYPE_STRING, f"{row.doc_index}:{row.page}")
+        value = GObject.Value(GObject.TYPE_STRING, self.drag_key(row))
         return Gdk.ContentProvider.new_for_value(value)
 
     def on_drag_begin(self, source, drag, row):
@@ -395,17 +404,37 @@ class Sidebar(Gtk.Box):
         if paintable is not None:
             source.set_icon(paintable, 20, 20)
 
+    @staticmethod
+    def parse_key(value):
+        try:
+            owner, doc_index, page = value.split(":")
+            return owner, int(doc_index), int(page)
+        except (AttributeError, ValueError):
+            return None
+
+    def clear_drop_marks(self, row):
+        row.remove_css_class("drop-before")
+        row.remove_css_class("drop-after")
+
     def on_drop_motion(self, target, x, y, row):
-        row.add_css_class("drop-target")
-        return Gdk.DragAction.MOVE
+        after = y > row.get_height() / 2
+        self.clear_drop_marks(row)
+        row.add_css_class("drop-after" if after else "drop-before")
+        key = self.parse_key(target.get_value()) if target.get_value() else None
+        if key and key[0] == self.owner_id and key[1] == row.doc_index:
+            return Gdk.DragAction.MOVE
+        return Gdk.DragAction.COPY
 
     def on_drop(self, target, value, x, y, row):
-        row.remove_css_class("drop-target")
-        try:
-            doc_index, page = (int(part) for part in value.split(":"))
-        except ValueError:
+        self.clear_drop_marks(row)
+        if self.parse_key(value) is None:
             return False
-        if doc_index != row.doc_index or page == row.page:
-            return False
-        self.emit("move-page", doc_index, page, row.page)
+        at = row.page + (1 if y > row.get_height() / 2 else 0)
+        # Rebuilding the sidebar inside the drop handler would destroy the
+        # row that is still handling the event.
+        GLib.idle_add(self._emit_drop, value, row.doc_index, at)
         return True
+
+    def _emit_drop(self, value, doc_index, at):
+        self.emit("drop-page", value, doc_index, at)
+        return False

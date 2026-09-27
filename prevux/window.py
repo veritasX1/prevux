@@ -96,7 +96,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
 
         self.sidebar = Sidebar()
         self.sidebar.connect("page-activated", self.on_page_activated)
-        self.sidebar.connect("move-page", self.on_move_page)
+        self.sidebar.connect("drop-page", self.on_drop_page)
         self.sidebar.connect("search-activated", self.on_search_result)
         self.sidebar.connect(
             "outline-activated", lambda _sidebar, page, y: self.view.scroll_to_page(page, y),
@@ -1112,16 +1112,40 @@ class PrevuxWindow(Adw.ApplicationWindow):
         doc.delete_pages(pages)
         self.after_edit(structure=True)
 
-    def on_move_page(self, sidebar, doc_index, source, target):
+    def on_drop_page(self, sidebar, key, doc_index, at):
+        owner, source_index, page = Sidebar.parse_key(key)
         doc = self.documents[doc_index]
         if doc.kind != "pdf":
             return
-        if doc_index != self.doc_index:
+
+        if owner == sidebar.owner_id and source_index == doc_index:
+            # Reorder within the same PDF.
+            target = at if at <= page else at - 1
+            if target == page:
+                return
             self.show_document(doc_index)
+            doc.checkpoint(structure=True)
+            doc.move_page(page, target)
+            self.after_edit(structure=True)
+            self.sidebar.select_page(doc_index, target)
+            GLib.idle_add(lambda: self.view.scroll_to_page(target) and False)
+            return
+
+        # Copy from another document, possibly in another window.
+        source = None
+        for window in self.get_application().get_windows():
+            if isinstance(window, PrevuxWindow) and window.sidebar.owner_id == owner:
+                if 0 <= source_index < len(window.documents):
+                    source = window.documents[source_index]
+        if source is None or page >= source.page_count:
+            return
+        self.show_document(doc_index)
         doc.checkpoint(structure=True)
-        doc.move_page(source, target)
+        doc.insert_page_from(source, page, at)
         self.after_edit(structure=True)
-        self.sidebar.select_page(doc_index, target)
+        self.sidebar.select_page(doc_index, at)
+        GLib.idle_add(lambda: self.view.scroll_to_page(at) and False)
+        self.toast(_("Page copied to “{name}”").format(name=doc.name))
 
     # ========================================================
     # HIGHLIGHT
