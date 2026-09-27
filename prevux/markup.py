@@ -127,6 +127,7 @@ class MarkupToolbar(Gtk.Box):
         for tool, icon, tooltip in (
             ("text-select", "text-select", _("Text Selection")),
             ("rect-select", "rect-select", _("Rectangular Selection")),
+            ("redact", "redact", _("Redact")),
             ("sketch", "sketch", _("Sketch")),
             ("note", "note", _("Note")),
         ):
@@ -219,6 +220,7 @@ class MarkupToolbar(Gtk.Box):
         pdf = kind == "pdf"
         self.tool_buttons["text-select"].set_visible(pdf)
         self.tool_buttons["note"].set_visible(pdf)
+        self.tool_buttons["redact"].set_visible(pdf)
         self.image_box.set_visible(kind == "image")
 
     def sync_tool(self, tool):

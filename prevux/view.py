@@ -19,6 +19,7 @@ from .model import (
     LineAnnotation,
     MarkupAnnotation,
     NoteAnnotation,
+    RedactAnnotation,
     ShapeAnnotation,
     TextAnnotation,
     new_shape,
@@ -819,7 +820,18 @@ class DocumentView(Gtk.Widget):
         self.clear_text_selection()
         self.rect_selection = None
 
-        if self.tool == "text-select" and self.doc.kind == "pdf":
+        if self.tool == "redact" and self.doc.kind == "pdf":
+            # On text: redact whole words; elsewhere: redact an area.
+            on_word = any(
+                x0 - 2 <= px <= x1 + 2 and y0 - 2 <= py <= y1 + 2
+                for x0, y0, x1, y1, *_rest in self.doc.page_words(page)
+            )
+            if on_word:
+                self.action = {"type": "text", "page": page, "start": (px, py)}
+            else:
+                px, py = self.clamp_to_page(page, px, py)
+                self.action = {"type": "rect", "page": page, "start": (px, py)}
+        elif self.tool == "text-select" and self.doc.kind == "pdf":
             self.action = {"type": "text", "page": page, "start": (px, py)}
         else:
             px, py = self.clamp_to_page(page, px, py)
@@ -894,6 +906,19 @@ class DocumentView(Gtk.Widget):
             if isinstance(self.selected, NoteAnnotation):
                 self.start_editing(self.selected, action["page"])
 
+        elif kind == "text" and self.tool == "redact":
+            if self.text_selection:
+                self.add_redaction(self.text_selection["page"], self.text_selection["rects"])
+
+        elif kind == "rect" and self.tool == "redact":
+            if self.rect_selection:
+                page, x0, y0, x1, y1 = self.rect_selection
+                self.rect_selection = None
+                if abs(x1 - x0) * self.zoom >= 4 and abs(y1 - y0) * self.zoom >= 4:
+                    rect = (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
+                    self.add_redaction(page, [rect])
+                self.queue_draw()
+
         elif kind == "text":
             if self.text_selection and self.highlight_mode:
                 self.add_markup(self.highlight_mode[0], self.highlight_mode[1])
@@ -941,6 +966,8 @@ class DocumentView(Gtk.Widget):
                     name = "copy"
                 elif self.hit_annotation(page, px, py) is not None:
                     name = "move"
+                elif self.tool == "redact":
+                    name = "crosshair"
                 elif self.tool == "text-select" and self.doc.kind == "pdf":
                     name = "text"
                 elif self.tool == "rect-select" or self.doc.kind == "image":
@@ -1031,6 +1058,15 @@ class DocumentView(Gtk.Widget):
         markup = MarkupAnnotation(kind, selection["rects"], color, selection["text"])
         self.doc.annotations[selection["page"]].append(markup)
         self.clear_text_selection()
+        self.notify_modified()
+
+    def add_redaction(self, page, rects):
+        self.doc.checkpoint()
+        self.doc.annotations[page].append(RedactAnnotation(rects))
+        self.clear_text_selection()
+        if not getattr(self, "redact_hint_shown", False):
+            self.redact_hint_shown = True
+            self.emit("notice", _("Redacted content is removed permanently when you save."))
         self.notify_modified()
 
     def delete_selected(self):

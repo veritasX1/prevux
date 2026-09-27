@@ -621,7 +621,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
                 self.view.queue_draw()
             elif self.is_fullscreen():
                 self.unfullscreen()
-            elif self.view.tool in ("sketch", "note"):
+            elif self.view.tool in ("sketch", "note", "redact"):
                 self.view.set_tool("select_default")
                 self.markup.sync_tool(self.view.tool)
             self.update_state()
@@ -1257,7 +1257,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.markup_revealer.set_reveal_child(active)
         if not active:
             self.view.finish_editing()
-            if self.view.tool in ("sketch", "note"):
+            if self.view.tool in ("sketch", "note", "redact"):
                 self.view.set_tool("select_default")
                 self.markup.sync_tool(self.view.tool)
 

@@ -255,7 +255,7 @@ class Annotation:
         if hasattr(annotation, "rects"):
             annotation.rects = list(annotation.rects)
 
-        if cls in (ShapeAnnotation, LineAnnotation, MarkupAnnotation):
+        if cls in (ShapeAnnotation, LineAnnotation, MarkupAnnotation, RedactAnnotation):
             annotation.kind = kind
 
         return annotation
@@ -859,6 +859,21 @@ class MarkupAnnotation(Annotation):
                 cr.stroke()
 
 
+class RedactAnnotation(MarkupAnnotation):
+    """Black boxes; the content underneath is removed when saving."""
+
+    KINDS = ("redact",)
+
+    def __init__(self, rects):
+        super().__init__("redact", rects, BLACK)
+
+    def draw(self, cr):
+        cr.set_source_rgb(0, 0, 0)
+        for x0, y0, x1, y1 in self.rects:
+            cr.rectangle(x0, y0, x1 - x0, y1 - y0)
+        cr.fill()
+
+
 # ============================================================
 # LOUPE
 # ============================================================
@@ -963,6 +978,7 @@ ANNOTATION_TYPES = {
     **{kind: MarkupAnnotation for kind in MarkupAnnotation.KINDS},
     "ink": InkAnnotation,
     "loupe": LoupeAnnotation,
+    "redact": RedactAnnotation,
     "signature": SignatureAnnotation,
     "text": TextAnnotation,
     "note": NoteAnnotation,

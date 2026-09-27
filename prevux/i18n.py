@@ -126,6 +126,9 @@ GERMAN = {
     "Rectangular Selection": "Rechteckige Auswahl",
     "Red": "Rot",
     "Redo": "Wiederholen",
+    "Redact": "Schwärzen",
+    "Redacted content is removed permanently when you save.":
+        "Geschwärzte Inhalte werden beim Sichern dauerhaft entfernt.",
     "Reset All": "Alle zurücksetzen",
     "Resulting Size": "Neue Größe",
     "Rotate": "Drehen",
