@@ -104,6 +104,7 @@ GERMAN = {
     "1 result": "1 Treffer",
     "{count} results": "{count} Treffer",
     "Page {page}": "Seite {page}",
+    "Page copied to “{name}”": "Seite nach „{name}“ kopiert",
     "No saved signatures yet.": "Noch keine Unterschriften gesichert.",
     "Note": "Notiz",
     "OK": "OK",

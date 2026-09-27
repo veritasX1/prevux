@@ -523,6 +523,28 @@ class PDFDocument(BaseDocument):
         self.annotations.insert(target, annotations)
         self.changed()
 
+    def insert_page_from(self, source, page, index):
+        """Copy a page of another document (PDF or image) to `index`."""
+        annotations = [annotation.clone() for annotation in source.annotations[page]]
+        if source.kind == "pdf":
+            self.doc.insert_pdf(source.doc, from_page=page, to_page=page, start_at=index)
+        else:
+            # Images become pages at 96 dpi, the usual screen resolution.
+            scale = 72 / 96
+            width, height = source.page_size(0)
+            new = self.doc.new_page(pno=index, width=width * scale, height=height * scale)
+            buffer = io.BytesIO()
+            source.image.save(buffer, "PNG")
+            new.insert_image(new.rect, stream=buffer.getvalue())
+            for annotation in annotations:
+                annotation.transform(lambda x, y: (x * scale, y * scale))
+                annotation.style.width *= scale
+                if isinstance(annotation, TextAnnotation):
+                    annotation.size *= scale
+                annotation.normalize()
+        self.annotations.insert(index, annotations)
+        self.changed()
+
     def insert_blank_page(self, index):
         width, height = self.page_size(max(0, min(index, self.page_count - 1)))
         self.doc.new_page(pno=index, width=width, height=height)
