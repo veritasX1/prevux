@@ -10,6 +10,10 @@ import os
 
 GERMAN = {
     "About Prevux": "Über Prevux",
+    "Prevux is dedicated to the public domain under CC0 1.0 Universal. "
+    "You may copy, modify and distribute it without asking permission.":
+        "Prevux ist unter CC0 1.0 Universal gemeinfrei. Du darfst es ohne "
+        "Nachfrage kopieren, verändern und weitergeben.",
     "Actual Size": "Originalgröße",
     "Add Arrow": "Pfeil hinzufügen",
     "Add Line": "Linie hinzufügen",

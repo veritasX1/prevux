@@ -129,6 +129,18 @@ Shortcuts follow Preview, with <kbd>⌘</kbd> mapped to <kbd>Ctrl</kbd> and
 All shortcuts are listed under *Menu → Keyboard Shortcuts*
 (<kbd>Ctrl</kbd>+<kbd>?</kbd>).
 
+## License
+
+Prevux by Olaf Winkler is dedicated to the public domain under
+[CC0 1.0 Universal](LICENSE): you may copy, modify, distribute and use it,
+even commercially, without asking permission.
+
+Prevux uses these libraries, which keep their own licenses:
+[PyMuPDF](https://github.com/pymupdf/PyMuPDF) (AGPL-3.0),
+[Pillow](https://github.com/python-pillow/Pillow) (MIT-CMU),
+GTK, libadwaita and PyGObject (LGPL-2.1 or later). If you distribute Prevux
+bundled with PyMuPDF, the terms of the AGPL apply to that bundle.
+
 ---
 
 *Prevux is an independent project and is not affiliated with or endorsed by
