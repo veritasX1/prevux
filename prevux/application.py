@@ -123,7 +123,11 @@ class PrevuxApplication(Adw.Application):
             version="0.9 Beta",
             website="https://github.com/veritasX1/prevux",
             comments=_("A lightweight image and PDF viewer for Linux, inspired by macOS Preview."),
-            license_type=Gtk.License.UNKNOWN,
+            license_type=Gtk.License.CUSTOM,
+            license=_(
+                "Prevux is dedicated to the public domain under CC0 1.0 Universal. "
+                "You may copy, modify and distribute it without asking permission."
+            ),
         )
         about.present(self.get_active_window())
 
