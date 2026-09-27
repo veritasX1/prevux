@@ -381,6 +381,7 @@ class PDFDocument(BaseDocument):
         self.annotations = [self.import_annotations(page) for page in self.doc]
         self.cache = {}
         self.words = {}
+        self.fields = {}
 
     def page_size(self, index):
         rect = self.doc[index].rect
@@ -437,6 +438,7 @@ class PDFDocument(BaseDocument):
         super().changed()
         self.cache.clear()
         self.words.clear()
+        self.fields.clear()
 
     # --- text -------------------------------------------------
 
@@ -451,6 +453,72 @@ class PDFDocument(BaseDocument):
                 words.append((rect.x0, rect.y0, rect.x1, rect.y1, text, block, line))
             self.words[index] = words
         return self.words[index]
+
+    # --- forms ------------------------------------------------
+
+    @property
+    def has_forms(self):
+        return bool(self.doc.is_form_pdf)
+
+    def form_fields(self, index):
+        """Fillable fields of a page, with rectangles in display space."""
+        if index not in self.fields:
+            page = self.doc[index]
+            matrix = page.rotation_matrix
+            fields = []
+            for widget in page.widgets() or []:
+                kind = widget.field_type
+                if kind not in (
+                    pymupdf.PDF_WIDGET_TYPE_TEXT,
+                    pymupdf.PDF_WIDGET_TYPE_CHECKBOX,
+                    pymupdf.PDF_WIDGET_TYPE_RADIOBUTTON,
+                    pymupdf.PDF_WIDGET_TYPE_COMBOBOX,
+                    pymupdf.PDF_WIDGET_TYPE_LISTBOX,
+                ):
+                    continue
+                rect = pymupdf.Rect(widget.rect) * matrix
+                rect.normalize()
+                flags = widget.field_flags or 0
+                fields.append({
+                    "xref": widget.xref,
+                    "kind": {
+                        pymupdf.PDF_WIDGET_TYPE_TEXT: "text",
+                        pymupdf.PDF_WIDGET_TYPE_CHECKBOX: "checkbox",
+                        pymupdf.PDF_WIDGET_TYPE_RADIOBUTTON: "radio",
+                        pymupdf.PDF_WIDGET_TYPE_COMBOBOX: "choice",
+                        pymupdf.PDF_WIDGET_TYPE_LISTBOX: "choice",
+                    }[kind],
+                    "name": widget.field_name or "",
+                    "rect": (rect.x0, rect.y0, rect.x1, rect.y1),
+                    "value": widget.field_value,
+                    "checked": widget.field_value not in (None, "", "Off", False),
+                    "choices": list(widget.choice_values or []),
+                    "multiline": bool(flags & pymupdf.PDF_TX_FIELD_IS_MULTILINE),
+                    "readonly": bool(flags & pymupdf.PDF_FIELD_IS_READ_ONLY),
+                    "font_size": widget.text_fontsize or 0,
+                    "max_length": widget.text_maxlen or 0,
+                })
+            self.fields[index] = fields
+        return self.fields[index]
+
+    def set_field(self, index, xref, value):
+        page = self.doc[index]
+        widget = page.load_widget(xref)
+        if widget.field_type == pymupdf.PDF_WIDGET_TYPE_RADIOBUTTON:
+            # Only one button of a group may be on.
+            for other in page.widgets(types=[pymupdf.PDF_WIDGET_TYPE_RADIOBUTTON]):
+                if other.field_name == widget.field_name and other.xref != xref:
+                    other.field_value = False
+                    other.update()
+            widget = page.load_widget(xref)
+            widget.field_value = True
+        elif widget.field_type == pymupdf.PDF_WIDGET_TYPE_CHECKBOX:
+            widget.field_value = widget.on_state() if value else "Off"
+        else:
+            widget.field_value = value
+        widget.update()
+        self.cache.pop(index, None)
+        self.fields.pop(index, None)
 
     def outline(self):
         """Table of contents as (level, title, page, y) in display space."""
