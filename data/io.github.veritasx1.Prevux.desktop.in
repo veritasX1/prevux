@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=Prevux
+GenericName=Image and PDF Viewer
+GenericName[de]=Bild- und PDF-Betrachter
+Comment=View and mark up images and PDFs
+Comment[de]=Bilder und PDFs ansehen und beschriften
+Exec=@EXEC@ %F
+Icon=io.github.veritasx1.Prevux
+Terminal=false
+Categories=Graphics;Viewer;Office;GTK;
+MimeType=application/pdf;image/png;image/jpeg;image/webp;image/bmp;image/gif;image/tiff;
+Keywords=PDF;Image;Preview;Vorschau;Markup;Annotate;Sign;
+StartupNotify=true
+StartupWMClass=io.github.veritasx1.Prevux

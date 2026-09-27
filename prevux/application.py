@@ -62,6 +62,12 @@ class PrevuxApplication(Adw.Application):
         Adw.Application.do_startup(self)
         GLib.set_application_name("Prevux")
 
+        display = Gdk.Display.get_default()
+        Gtk.IconTheme.get_for_display(display).add_search_path(
+            str(Path(__file__).resolve().parent.parent / "data")
+        )
+        Gtk.Window.set_default_icon_name(self.get_application_id())
+
         css = Gtk.CssProvider()
         css.load_from_path(str(Path(__file__).with_name("style.css")))
         Gtk.StyleContext.add_provider_for_display(
@@ -111,9 +117,9 @@ class PrevuxApplication(Adw.Application):
     def show_about(self):
         about = Adw.AboutDialog(
             application_name="Prevux",
-            application_icon="image-viewer",
+            application_icon=self.get_application_id(),
             developer_name="Olaf Winkler",
-            version="0.2",
+            version="0.3",
             website="https://github.com/veritasX1/prevux",
             comments=_("A lightweight image and PDF viewer for Linux, inspired by macOS Preview."),
             license_type=Gtk.License.UNKNOWN,
