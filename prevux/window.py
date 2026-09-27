@@ -1,1560 +1,1481 @@
+"""The Prevux document window."""
+
+import os
 import tempfile
 from pathlib import Path
 
 import gi
 
 gi.require_version("Gtk", "4.0")
-gi.require_version("Gdk", "4.0")
-gi.require_version("GdkPixbuf", "2.0")
+gi.require_version("Adw", "1")
 
-from gi.repository import Gtk, Gdk, Gio, GLib, GdkPixbuf
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk
+from PIL import Image, ImageEnhance, ImageOps
 
-from .canvas import ZoomCanvas
-from .document import Document
-from .image_document import ImageDocument
-from .pdf_document import PDFDocument
-from .text_tools import TextTool
-
-
-IMAGE_EXTENSIONS = {
-    ".jpg",
-    ".jpeg",
-    ".png",
-    ".webp",
-    ".bmp",
-    ".gif",
-    ".tif",
-    ".tiff",
-}
+from .documents import (
+    IMAGE_EXTENSIONS,
+    PDF_EXTENSIONS,
+    ImageDocument,
+    PDFDocument,
+    pil_to_surface,
+    open_document,
+)
+from .i18n import _
+from .icons import Icon, Swatch, icon_button, icon_menu_button
+from .markup import MarkupDefaults, MarkupToolbar, popover_box
+from .model import HIGHLIGHT_COLORS, TextAnnotation, NoteAnnotation
+from .sidebar import Sidebar
+from .view import DocumentView
 
 
-class PrevuxWindow(Gtk.ApplicationWindow):
+# Window controls on the leading edge, as on the Mac.
+DECORATION_LAYOUT = "close,minimize,maximize:"
+
+EXPORT_FORMATS = [
+    ("PNG", ".png"),
+    ("JPEG", ".jpg"),
+    ("TIFF", ".tiff"),
+    ("WebP", ".webp"),
+    ("BMP", ".bmp"),
+    ("PDF", ".pdf"),
+]
+
+
+class PrevuxWindow(Adw.ApplicationWindow):
 
     def __init__(self, app):
-        super().__init__(
-            application=app,
-            title="Prevux",
-            default_width=1200,
-            default_height=800,
-        )
+        super().__init__(application=app)
+        self.set_default_size(1100, 800)
+        self.set_title("Prevux")
 
         self.documents = []
-        self.current = None
-        self.current_index = -1
-        self.temp_files = []
-        self.markup_active = False
-        self.active_text_box = None
-        self.unsaved_changes = False
-        self.text_tool = TextTool(self)
+        self.doc_index = -1
+        self.defaults = MarkupDefaults()
+        self.force_close = False
+        self.highlight_choice = ("highlight", HIGHLIGHT_COLORS[0][1])
+        self.search_results = []
+        self.adjusting = None
 
         self.build_ui()
-        self.install_shortcuts()
+        self.install_actions()
+        self.install_input()
+        self.update_state()
+
+    @property
+    def doc(self):
+        if 0 <= self.doc_index < len(self.documents):
+            return self.documents[self.doc_index]
+        return None
 
     # ========================================================
-    # MAIN UI
+    # UI
     # ========================================================
 
     def build_ui(self):
+        self.split = Adw.OverlaySplitView()
+        self.split.set_min_sidebar_width(150)
+        self.split.set_max_sidebar_width(190)
+        self.split.set_show_sidebar(False)
 
-        root = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL
+        # --- sidebar ------------------------------------------
+        sidebar_view = Adw.ToolbarView()
+        sidebar_header = Adw.HeaderBar()
+        sidebar_header.set_decoration_layout(DECORATION_LAYOUT)
+        sidebar_header.set_show_title(False)
+        sidebar_header.set_show_end_title_buttons(False)
+        sidebar_view.add_top_bar(sidebar_header)
+
+        self.sidebar = Sidebar()
+        self.sidebar.connect("page-activated", self.on_page_activated)
+        self.sidebar.connect("move-page", self.on_move_page)
+        self.sidebar.connect("delete-pages", lambda *_args: self.activate_action("win.delete-pages"))
+        sidebar_view.set_content(self.sidebar)
+        self.split.set_sidebar(sidebar_view)
+
+        # --- content ------------------------------------------
+        content_view = Adw.ToolbarView()
+        content_view.set_top_bar_style(Adw.ToolbarStyle.RAISED_BORDER)
+
+        header = Adw.HeaderBar()
+        header.set_decoration_layout(DECORATION_LAYOUT)
+        header.set_title_widget(Gtk.Box())
+        self.split.bind_property(
+            "show-sidebar", header, "show-start-title-buttons",
+            GObject.BindingFlags.SYNC_CREATE | GObject.BindingFlags.INVERT_BOOLEAN,
         )
 
-        self.set_child(root)
-
-        # Prevux annotation/text styling
-        css = Gtk.CssProvider()
-        css_path = Path(__file__).with_name("text_box.css")
-
-        if css_path.exists():
-            css.load_from_path(str(css_path))
-
-            display = Gdk.Display.get_default()
-
-            if display is not None:
-                Gtk.StyleContext.add_provider_for_display(
-                    display,
-                    css,
-                    Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
-                )
-
-        root.append(self.build_menu_bar())
-        root.append(self.build_main_toolbar())
-
-        self.markup_toolbar = self.build_markup_toolbar()
-        self.markup_toolbar.set_visible(False)
-        root.append(self.markup_toolbar)
-
-        self.paned = Gtk.Paned(
-            orientation=Gtk.Orientation.HORIZONTAL
+        self.sidebar_button = icon_button("sidebar", _("Show Sidebar"), toggle=True)
+        self.split.bind_property(
+            "show-sidebar", self.sidebar_button, "active",
+            GObject.BindingFlags.SYNC_CREATE | GObject.BindingFlags.BIDIRECTIONAL,
         )
+        header.pack_start(self.sidebar_button)
 
-        root.append(self.paned)
+        titles = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER)
+        titles.set_margin_start(6)
+        self.title_label = Gtk.Label(xalign=0, ellipsize=3)
+        self.title_label.add_css_class("document-title")
+        self.subtitle_label = Gtk.Label(xalign=0, ellipsize=3)
+        self.subtitle_label.add_css_class("document-subtitle")
+        titles.append(self.title_label)
+        titles.append(self.subtitle_label)
+        header.pack_start(titles)
 
-        # ----------------------------------------------------
-        # Sidebar
-        # ----------------------------------------------------
+        # Trailing items, packed from the right edge inwards.
+        menu_button = icon_menu_button("more", _("Menu"))
+        menu_button.set_menu_model(self.build_menu())
+        header.pack_end(menu_button)
 
-        self.sidebar = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL,
-            spacing=6,
-        )
+        self.search_entry = Gtk.SearchEntry(placeholder_text=_("Search"))
+        self.search_entry.set_size_request(170, -1)
+        self.search_entry.connect("search-changed", self.on_search_changed)
+        self.search_entry.connect("activate", lambda _entry: self.search_step(1))
+        self.search_entry.connect("stop-search", self.on_stop_search)
+        header.pack_end(self.search_entry)
 
-        self.sidebar.set_size_request(220, -1)
-        self.sidebar.set_margin_start(8)
-        self.sidebar.set_margin_end(8)
-        self.sidebar.set_margin_top(8)
-        self.sidebar.set_margin_bottom(8)
+        self.markup_button = icon_button("markup", _("Show Markup Toolbar"), toggle=True)
+        self.markup_button.connect("toggled", self.on_markup_toggled)
+        header.pack_end(self.markup_button)
 
-        title = Gtk.Label(label="Pages")
-        title.set_xalign(0)
+        rotate = icon_button("rotate", _("Rotate"))
+        rotate.set_action_name("win.rotate-left")
+        header.pack_end(rotate)
 
-        self.sidebar.append(title)
+        self.highlight_box = Gtk.Box()
+        self.highlight_button = icon_button("highlight", _("Highlight"), toggle=True)
+        self.highlight_button.connect("toggled", self.on_highlight_toggled)
+        self.highlight_box.append(self.highlight_button)
+        highlight_menu = Gtk.MenuButton(popover=self.build_highlight_popover())
+        highlight_menu.add_css_class("flat")
+        highlight_menu.add_css_class("narrow-arrow")
+        highlight_menu.set_tooltip_text(_("Highlight Color"))
+        self.highlight_box.append(highlight_menu)
+        header.pack_end(self.highlight_box)
 
-        self.page_list = Gtk.ListBox()
+        share = icon_button("share", _("Share"))
+        share.set_action_name("win.share")
+        header.pack_end(share)
 
-        page_scroll = Gtk.ScrolledWindow()
-        page_scroll.set_child(self.page_list)
-        page_scroll.set_vexpand(True)
+        zoom_box = Gtk.Box()
+        zoom_box.add_css_class("linked")
+        zoom_out = icon_button("zoom-out", _("Zoom Out"))
+        zoom_out.set_action_name("win.zoom-out")
+        zoom_in = icon_button("zoom-in", _("Zoom In"))
+        zoom_in.set_action_name("win.zoom-in")
+        zoom_box.append(zoom_out)
+        zoom_box.append(zoom_in)
+        header.pack_end(zoom_box)
 
-        self.sidebar.append(page_scroll)
+        self.info_popover = Gtk.Popover()
+        self.info_popover.connect("show", lambda _popover: self.fill_info())
+        info = icon_menu_button("info", _("Inspector"), self.info_popover)
+        header.pack_end(info)
 
-        self.paned.set_start_child(self.sidebar)
+        content_view.add_top_bar(header)
 
-        # ----------------------------------------------------
-        # Canvas
-        # ----------------------------------------------------
+        self.markup = MarkupToolbar(self)
+        self.markup_revealer = Gtk.Revealer(child=self.markup)
+        self.markup_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
+        content_view.add_top_bar(self.markup_revealer)
 
-        self.canvas = ZoomCanvas()
+        # --- document area ------------------------------------
+        self.scroller = Gtk.ScrolledWindow()
+        self.scroller.add_css_class("document-scroller")
+        self.view = DocumentView(self.scroller)
+        self.view.defaults = self.defaults
+        self.scroller.set_child(self.view)
+        self.view.connect("page-changed", self.on_view_page_changed)
+        self.view.connect("selection-changed", self.on_view_selection_changed)
+        self.view.connect("modified", self.on_view_modified)
+        self.view.connect("zoom-changed", lambda *_args: self.update_state())
+        self.markup.update_color_icons()
 
-        self.paned.set_end_child(self.canvas)
+        empty = Adw.StatusPage()
+        empty.set_title(_("No Document Open"))
+        empty.set_description(_("Open an image or a PDF, or drop a file here."))
+        open_button = Gtk.Button(label=_("Open…"), halign=Gtk.Align.CENTER)
+        open_button.add_css_class("pill")
+        open_button.add_css_class("suggested-action")
+        open_button.set_action_name("win.open")
+        empty.set_child(open_button)
 
-        self.sidebar.set_visible(False)
+        self.stack = Gtk.Stack()
+        self.stack.add_named(empty, "empty")
+        self.stack.add_named(self.scroller, "document")
 
-        # ----------------------------------------------------
-        # Status
-        # ----------------------------------------------------
+        self.toasts = Adw.ToastOverlay(child=self.stack)
+        content_view.set_content(self.toasts)
+        self.split.set_content(content_view)
+        self.set_content(self.split)
 
-        self.status = Gtk.Label(label="Ready")
-        self.status.set_xalign(0)
-        self.status.set_margin_start(10)
-        self.status.set_margin_top(3)
-        self.status.set_margin_bottom(3)
-
-        root.append(self.status)
-
-    # ========================================================
-    # MAIN MENU
-    # ========================================================
-
-    def build_menu_bar(self):
-
-        bar = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL,
-            spacing=2,
-        )
-
-        bar.set_margin_start(6)
-        bar.set_margin_top(3)
-        bar.set_margin_bottom(3)
-
-        self.create_menu(
-            bar,
-            "File",
-            [
-                ("Open…", self.open_files),
-                ("Save", self.save),
-                ("Save As…", self.save_as),
-                (
-                    "Quit",
-                    lambda: self.get_application().quit(),
-                ),
-            ],
-        )
-
-        self.create_menu(
-            bar,
-            "Edit",
-            [
-                (
-                    "Undo",
-                    lambda: self.message(
-                        "Undo is not implemented yet."
-                    ),
-                ),
-                (
-                    "Redo",
-                    lambda: self.message(
-                        "Redo is not implemented yet."
-                    ),
-                ),
-            ],
-        )
-
-        self.create_menu(
-            bar,
-            "View",
-            [
-                ("Fit to Window", self.fit),
-                ("Actual Size", self.actual_size),
-                ("Toggle Sidebar", self.toggle_sidebar),
-            ],
-        )
-
-        self.create_menu(
-            bar,
-            "Tools",
-            [
-                ("Markup", self.toggle_markup),
-                (
-                    "Crop…",
-                    lambda: self.message(
-                        "Crop tool is next."
-                    ),
-                ),
-                (
-                    "Adjustments…",
-                    lambda: self.message(
-                        "Adjustments are next."
-                    ),
-                ),
-            ],
-        )
-
-        return bar
-
-    def create_menu(self, bar, title, entries):
-
-        button = Gtk.MenuButton(label=title)
-
+    def build_highlight_popover(self):
         popover = Gtk.Popover()
-
-        box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL,
-            spacing=1,
-        )
-
-        box.set_margin_start(5)
-        box.set_margin_end(5)
-        box.set_margin_top(5)
-        box.set_margin_bottom(5)
-
-        for label, callback in entries:
-
-            item = Gtk.Button(label=label)
-            item.set_has_frame(False)
-
-            item.connect(
-                "clicked",
-                lambda _button, function=callback: function(),
-            )
-
-            box.append(item)
-
-        popover.set_child(box)
-        button.set_popover(popover)
-
-        bar.append(button)
-
-    # ========================================================
-    # MAIN TOOLBAR
-    # ========================================================
-
-    def build_main_toolbar(self):
-
-        bar = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL,
-            spacing=5,
-        )
-
-        bar.set_margin_start(8)
-        bar.set_margin_end(8)
-        bar.set_margin_top(4)
-        bar.set_margin_bottom(4)
-
-        self.add_toolbar_button(
-            bar,
-            "↶",
-            "Undo",
-            lambda: self.message(
-                "Undo is not implemented yet."
-            ),
-        )
-
-        self.add_toolbar_button(
-            bar,
-            "↷",
-            "Redo",
-            lambda: self.message(
-                "Redo is not implemented yet."
-            ),
-        )
-
-        self.add_separator(bar)
-
-        self.add_toolbar_button(
-            bar,
-            "−",
-            "Zoom Out",
-            lambda: self.zoom(-1),
-        )
-
-        self.zoom_label = Gtk.Label(label="Fit")
-        self.zoom_label.set_width_chars(6)
-
-        bar.append(self.zoom_label)
-
-        self.add_toolbar_button(
-            bar,
-            "+",
-            "Zoom In",
-            lambda: self.zoom(1),
-        )
-
-        self.add_separator(bar)
-
-        self.add_toolbar_button(
-            bar,
-            "Fit",
-            "Fit to Window",
-            self.fit,
-        )
-
-        self.add_toolbar_button(
-            bar,
-            "100%",
-            "Actual Size",
-            self.actual_size,
-        )
-
-        self.add_separator(bar)
-
-        self.add_toolbar_button(
-            bar,
-            "Crop",
-            "Crop",
-            lambda: self.message(
-                "Crop tool is next."
-            ),
-        )
-
-        self.add_toolbar_button(
-            bar,
-            "Rotate",
-            "Rotate",
-            lambda: self.message(
-                "Rotate tool is next."
-            ),
-        )
-
-        self.markup_button = Gtk.ToggleButton(
-            label="Markup"
-        )
-
-        self.markup_button.set_tooltip_text(
-            "Show Markup Toolbar"
-        )
-
-        self.markup_button.connect(
-            "toggled",
-            self.on_markup_button,
-        )
-
-        bar.append(self.markup_button)
-
-        return bar
-
-    def add_separator(self, bar):
-
-        separator = Gtk.Separator(
-            orientation=Gtk.Orientation.VERTICAL
-        )
-
-        separator.set_margin_start(4)
-        separator.set_margin_end(4)
-
-        bar.append(separator)
-
-    def add_toolbar_button(
-        self,
-        bar,
-        label,
-        tooltip,
-        callback,
-    ):
-
-        button = Gtk.Button(label=label)
-
-        button.set_tooltip_text(tooltip)
-
-        button.connect(
-            "clicked",
-            lambda _button: callback(),
-        )
-
-        bar.append(button)
-
-    # ========================================================
-    # MARKUP TOOLBAR
-    # ========================================================
-
-    def build_markup_toolbar(self):
-
-        bar = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL,
-            spacing=2,
-        )
-
-        bar.set_margin_start(8)
-        bar.set_margin_end(8)
-        bar.set_margin_top(2)
-        bar.set_margin_bottom(4)
-
-        self.add_markup_button(
-            bar,
-            "▧",
-            "Text Selection",
-            lambda: self.message(
-                "Text selection mode."
-            ),
-        )
-
-        self.add_markup_button(
-            bar,
-            "✎",
-            "Sketch",
-            lambda: self.message(
-                "Sketch tool selected."
-            ),
-        )
-
-        bar.append(
-            self.make_popover_button(
-                "▢",
-                "Shapes",
-                self.build_shapes_popover(),
-            )
-        )
-
-        self.add_markup_button(
-            bar,
-            "T",
-            "Text",
-            self.activate_text_tool,
-        )
-
-        signature_popover = self.build_simple_popover(
-            [
-                (
-                    "Create Signature",
-                    lambda: self.message(
-                        "Signature tool is next."
-                    ),
-                ),
-                (
-                    "Saved Signatures",
-                    lambda: self.message(
-                        "No saved signatures yet."
-                    ),
-                ),
-            ]
-        )
-
-        bar.append(
-            self.make_popover_button(
-                "✍",
-                "Signature",
-                signature_popover,
-            )
-        )
-
-        self.add_markup_button(
-            bar,
-            "▤",
-            "Note",
-            self.add_note,
-        )
-
-        self.add_separator(bar)
-
-        bar.append(
-            self.make_popover_button(
-                "━",
-                "Shape Style",
-                self.build_shape_style_popover(),
-            )
-        )
-
-        bar.append(
-            self.make_popover_button(
-                "■",
-                "Border Color",
-                self.build_color_popover(
-                    "Border Color"
-                ),
-            )
-        )
-
-        bar.append(
-            self.make_popover_button(
-                "■",
-                "Fill Color",
-                self.build_color_popover(
-                    "Fill Color"
-                ),
-            )
-        )
-
-        bar.append(
-            self.make_popover_button(
-                "A",
-                "Text Style",
-                self.build_text_style_popover(),
-            )
-        )
-
-        self.pdf_markup_separator = Gtk.Separator(
-            orientation=Gtk.Orientation.VERTICAL
-        )
-
-        self.pdf_markup_separator.set_margin_start(5)
-        self.pdf_markup_separator.set_margin_end(5)
-        self.pdf_markup_separator.set_visible(False)
-
-        bar.append(self.pdf_markup_separator)
-
-        return bar
-
-    def add_markup_button(
-        self,
-        bar,
-        label,
-        tooltip,
-        callback,
-    ):
-
-        button = Gtk.Button(label=label)
-
-        button.set_tooltip_text(tooltip)
-
-        button.connect(
-            "clicked",
-            lambda _button: callback(),
-        )
-
-        bar.append(button)
-
-    # ========================================================
-    # SHAPES
-    # ========================================================
-
-    def build_shapes_popover(self):
-
-        popover = Gtk.Popover()
-
-        grid = Gtk.Grid()
-
-        grid.set_row_spacing(6)
-        grid.set_column_spacing(6)
-
-        grid.set_margin_start(8)
-        grid.set_margin_end(8)
-        grid.set_margin_top(8)
-        grid.set_margin_bottom(8)
-
-        shapes = [
-            ("╱", "Line"),
-            ("➜", "Arrow"),
-            ("□", "Rectangle"),
-            ("▢", "Rounded Rectangle"),
-            ("○", "Ellipse"),
-            ("◯", "Circle"),
-            ("★", "Star"),
-            ("⬡", "Polygon"),
-            ("▣", "Highlight"),
-            ("⌕", "Magnifier"),
-        ]
-
-        for index, (symbol, name) in enumerate(shapes):
-
-            button = Gtk.Button(label=symbol)
-
-            button.set_tooltip_text(name)
-            button.set_size_request(42, 36)
-
-            button.connect(
-                "clicked",
-                lambda _button, shape=name:
-                self.select_shape(shape),
-            )
-
-            grid.attach(
-                button,
-                index % 2,
-                index // 2,
-                1,
-                1,
-            )
-
-        popover.set_child(grid)
-
-        return popover
-
-    def select_shape(self, shape):
-
-        self.message(
-            f"{shape} selected."
-        )
-
-    # ========================================================
-    # SHAPE STYLE
-    # ========================================================
-
-    def build_shape_style_popover(self):
-
-        popover = Gtk.Popover()
-
-        box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL,
-            spacing=4,
-        )
-
-        box.set_margin_start(8)
-        box.set_margin_end(8)
-        box.set_margin_top(8)
-        box.set_margin_bottom(8)
-
-        title = Gtk.Label(label="Shape Style")
-        title.set_xalign(0)
-
-        box.append(title)
-
-        for text in (
-            "Thin",
-            "Medium",
-            "Thick",
-            "Dashed",
-            "Dotted",
-            "Shadow",
-        ):
-
-            button = Gtk.Button(label=text)
-            button.set_has_frame(False)
-
-            button.connect(
-                "clicked",
-                lambda _button, value=text:
-                self.message(
-                    f"Shape style: {value}"
-                ),
-            )
-
-            box.append(button)
-
-        popover.set_child(box)
-
-        return popover
-
-    # ========================================================
-    # COLORS
-    # ========================================================
-
-    def build_color_popover(self, target):
-
-        popover = Gtk.Popover()
-
-        grid = Gtk.Grid()
-
-        grid.set_row_spacing(6)
-        grid.set_column_spacing(6)
-
-        grid.set_margin_start(8)
-        grid.set_margin_end(8)
-        grid.set_margin_top(8)
-        grid.set_margin_bottom(8)
-
-        colors = [
-            ("●", "Red"),
-            ("●", "Orange"),
-            ("●", "Yellow"),
-            ("●", "Green"),
-            ("●", "Blue"),
-            ("●", "Purple"),
-            ("●", "Pink"),
-            ("●", "Black"),
-            ("●", "White"),
-        ]
-
-        for index, (symbol, name) in enumerate(colors):
-
-            button = Gtk.Button(label=symbol)
-
-            button.set_tooltip_text(name)
-            button.set_size_request(36, 36)
-
-            button.connect(
-                "clicked",
-                lambda _button,
-                value=name,
-                which=target:
-                self.select_color(which, value),
-            )
-
-            grid.attach(
-                button,
-                index % 3,
-                index // 3,
-                1,
-                1,
-            )
-
-        popover.set_child(grid)
-
-        return popover
-
-    def select_color(self, target, color):
-
-        self.message(
-            f"{target}: {color}"
-        )
-
-    # ========================================================
-    # TEXT STYLE
-    # ========================================================
-
-    def build_text_style_popover(self):
-
-        popover = Gtk.Popover()
-
-        box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL,
-            spacing=5,
-        )
-
-        box.set_margin_start(10)
-        box.set_margin_end(10)
-        box.set_margin_top(10)
-        box.set_margin_bottom(10)
-
-        title = Gtk.Label(label="Text Style")
-        title.set_xalign(0)
-
-        box.append(title)
-
-        font_label = Gtk.Label(label="Font")
-        font_label.set_xalign(0)
-
-        box.append(font_label)
-
-        font = Gtk.DropDown.new_from_strings(
-            [
-                "Sans",
-                "Serif",
-                "Monospace",
-            ]
-        )
-
-        font.connect(
-            "notify::selected",
-            lambda dropdown, _param:
-            self.format_selected_text(
-                "font",
-                dropdown.get_selected_item().get_string()
-                if dropdown.get_selected_item() is not None
-                else "Sans"
-            )
-        )
-
-        box.append(font)
-
-        size_label = Gtk.Label(label="Size")
-        size_label.set_xalign(0)
-
-        box.append(size_label)
-
-        size = Gtk.SpinButton.new_with_range(
-            6,
-            500,
-            1,
-        )
-
-        size.set_value(32)
-
-        size.connect(
-            "value-changed",
-            lambda spin:
-            self.format_selected_text(
-                "size",
-                spin.get_value()
-            )
-        )
-
-        box.append(size)
-
-        style_row = Gtk.Box(
-            orientation=Gtk.Orientation.HORIZONTAL,
-            spacing=3,
-        )
-
-        bold = Gtk.ToggleButton(label="B")
-
-        bold.connect(
-            "toggled",
-            lambda button: self.format_selected_text(
-                "bold",
-                button.get_active()
-            )
-        )
-        italic = Gtk.ToggleButton(label="I")
-
-        italic.connect(
-            "toggled",
-            lambda button: self.format_selected_text(
-                "italic",
-                button.get_active()
-            )
-        )
-        underline = Gtk.ToggleButton(label="U")
-
-        underline.connect(
-            "toggled",
-            lambda button: self.format_selected_text(
-                "underline",
-                button.get_active()
-            )
-        )
-        strike = Gtk.ToggleButton(label="S")
-
-        strike.connect(
-            "toggled",
-            lambda button: self.format_selected_text(
-                "strike",
-                button.get_active()
-            )
-        )
-
-        for button in (
-            bold,
-            italic,
-            underline,
-            strike,
-        ):
-
-            style_row.append(button)
-
-        box.append(style_row)
-
-        text_color = Gtk.Button(
-            label="Text Color…"
-        )
-
-        text_color.connect(
-            "clicked",
-            lambda _button:
-            self.message(
-                "Text color palette."
-            ),
-        )
-
-        box.append(text_color)
-
-        background = Gtk.CheckButton(
-            label="Background"
-        )
-
-        box.append(background)
-
-        background_color = Gtk.Button(
-            label="Background Color…"
-        )
-
-        background_color.connect(
-            "clicked",
-            lambda _button:
-            self.message(
-                "Background color palette."
-            ),
-        )
-
-        box.append(background_color)
-
-        border = Gtk.CheckButton(
-            label="Border"
-        )
-
-        border.connect(
-            "toggled",
-            lambda button:
-            self.format_selected_text(
-                "border",
-                button.get_active()
-            )
-        )
-
-        box.append(border)
-
-        border_color = Gtk.ColorDialogButton()
-
-        border_color.set_dialog(
-            Gtk.ColorDialog()
-        )
-
-        border_color.set_tooltip_text(
-            "Border Color"
-        )
-
-        border_color.connect(
-            "notify::rgba",
-            lambda button, _param:
-            self.format_selected_text(
-                "border-color",
-                button.get_rgba()
-            )
-        )
-
-        box.append(border_color)
-
-        popover.set_child(box)
-
-        return popover
-
-    # ========================================================
-    # SIMPLE POPOVER
-    # ========================================================
-
-    def build_simple_popover(self, entries):
-
-        popover = Gtk.Popover()
-
-        box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL,
-            spacing=2,
-        )
-
-        box.set_margin_start(6)
-        box.set_margin_end(6)
-        box.set_margin_top(6)
-        box.set_margin_bottom(6)
-
-        for label, callback in entries:
-
+        box = popover_box(spacing=6)
+        row = Gtk.Box(spacing=4)
+        for name, color in HIGHLIGHT_COLORS:
+            button = Gtk.Button(child=Swatch(color))
+            button.add_css_class("flat")
+            button.add_css_class("swatch-button")
+            button.set_tooltip_text(_(name))
+            button.connect("clicked", self.on_highlight_choice, ("highlight", color), popover)
+            row.append(button)
+        box.append(row)
+        for kind, label in (("underline", _("Underline")), ("strike", _("Strike Through"))):
             button = Gtk.Button(label=label)
-            button.set_has_frame(False)
-
+            button.add_css_class("flat")
             button.connect(
-                "clicked",
-                lambda _button,
-                function=callback:
-                function(),
+                "clicked", self.on_highlight_choice, (kind, (1.0, 0.23, 0.19, 1.0)), popover,
             )
-
             box.append(button)
-
         popover.set_child(box)
-
         return popover
 
-    def make_popover_button(
-        self,
-        label,
-        tooltip,
-        popover,
-    ):
-
-        button = Gtk.MenuButton(label=label)
-
-        button.set_tooltip_text(tooltip)
-        button.set_popover(popover)
-
-        return button
-
-    # ========================================================
-    # MARKUP MODE
-    # ========================================================
-
-    def on_markup_button(self, button):
-
-        self.markup_active = (
-            button.get_active()
-        )
-
-        self.markup_toolbar.set_visible(
-            self.markup_active
-        )
-
-        if self.markup_active:
-            self.message("Markup tools")
-        else:
-            self.message("Ready")
-
-    def toggle_markup(self):
-
-        self.markup_button.set_active(
-            not self.markup_button.get_active()
-        )
-
-    # ========================================================
-    # OPEN
-    # ========================================================
-
-    def open_files(self):
-
-        dialog = Gtk.FileDialog()
-
-        dialog.set_title("Open")
-
-        filters = Gio.ListStore.new(
-            Gtk.FileFilter
-        )
-
-        file_filter = Gtk.FileFilter()
-
-        file_filter.set_name(
-            "Images and PDFs"
-        )
-
-        for pattern in (
-            "*.jpg",
-            "*.jpeg",
-            "*.png",
-            "*.webp",
-            "*.bmp",
-            "*.gif",
-            "*.tif",
-            "*.tiff",
-            "*.pdf",
-        ):
-
-            file_filter.add_pattern(pattern)
-
-        filters.append(file_filter)
-
-        dialog.set_filters(filters)
-
-        dialog.open_multiple(
-            self,
-            None,
-            self.files_selected,
-        )
-
-    def files_selected(
-        self,
-        dialog,
-        result,
-    ):
-
-        try:
-
-            files = (
-                dialog
-                .open_multiple_finish(result)
-            )
-
-        except GLib.Error:
-
-            return
-
-        if not files:
-            return
-
-        self.documents = []
-
-        for index in range(
-            files.get_n_items()
-        ):
-
-            path = (
-                files
-                .get_item(index)
-                .get_path()
-            )
-
-            if path:
-
-                self.documents.append(
-                    Document(path)
-                )
-
-        if self.documents:
-
-            self.load_document(0)
-
-    # ========================================================
-    # DOCUMENT
-    # ========================================================
-
-    def load_document(self, index):
-
-        if not (
-            0 <= index < len(self.documents)
-        ):
-
-            return
-
-        self.current_index = index
-
-        document = self.documents[index]
-
-        try:
-
-            if document.suffix == ".pdf":
-
-                self.current = PDFDocument(
-                    document.path
-                )
-
-                self.load_pdf()
-
-            elif document.suffix in IMAGE_EXTENSIONS:
-
-                self.current = ImageDocument(
-                    document.path
-                )
-
-                self.load_image()
-
-            else:
-
-                return
-
-            self.update_sidebar()
-
-            self.set_title(
-                f"{document.name} — Prevux"
-            )
-
-        except Exception as error:
-
-            self.show_error(str(error))
-
-    # ========================================================
-    # IMAGE
-    # ========================================================
-
-    def load_image(self):
-
-        temp = tempfile.NamedTemporaryFile(
-            suffix=".png",
-            delete=False,
-        )
-
-        temp.close()
-
-        self.temp_files.append(temp.name)
-
-        self.current.image.save(
-            temp.name,
-            "PNG",
-        )
-
-        pixbuf = GdkPixbuf.Pixbuf.new_from_file(
-            temp.name
-        )
-
-        self.canvas.set_pixbuf(pixbuf)
-        self.canvas.fit()
-
-        self.zoom_label.set_text("Fit")
-
-        self.message(
-            f"{self.current.image.width} × "
-            f"{self.current.image.height} px"
-        )
-
-    # ========================================================
-    # PDF
-    # ========================================================
-
-    def load_pdf(self):
-
-        self.canvas.set_png(
-            self.current.render()
-        )
-
-        self.canvas.fit()
-
-        self.zoom_label.set_text("Fit")
-
-        self.message(
-            f"Page "
-            f"{self.current.page_index + 1}"
-            f" / "
-            f"{self.current.page_count}"
-        )
-
-    # ========================================================
-    # SIDEBAR
-    # ========================================================
-
-    def update_sidebar(self):
-
-        while True:
-
-            row = (
-                self.page_list
-                .get_row_at_index(0)
-            )
-
-            if row is None:
-                break
-
-            self.page_list.remove(row)
-
-        show_sidebar = (
-            len(self.documents) > 1
-        )
-
-        if (
-            isinstance(
-                self.current,
-                PDFDocument,
-            )
-            and
-            self.current.page_count > 1
-        ):
-
-            show_sidebar = True
-
-            for index in range(
-                self.current.page_count
-            ):
-
-                row = Gtk.ListBoxRow()
-
-                row.set_child(
-                    Gtk.Label(
-                        label=f"Page {index + 1}"
-                    )
-                )
-
-                row.connect(
-                    "activate",
-                    lambda _row,
-                    page=index:
-                    self.select_pdf_page(page),
-                )
-
-                self.page_list.append(row)
-
-        if len(self.documents) > 1:
-
-            for index, document in enumerate(
-                self.documents
-            ):
-
-                row = Gtk.ListBoxRow()
-
-                row.set_child(
-                    Gtk.Label(
-                        label=document.name
-                    )
-                )
-
-                row.connect(
-                    "activate",
-                    lambda _row,
-                    item=index:
-                    self.load_document(item),
-                )
-
-                self.page_list.append(row)
-
-        self.sidebar.set_visible(show_sidebar)
-
-    def select_pdf_page(self, index):
-
-        if not isinstance(
-            self.current,
-            PDFDocument,
-        ):
-
-            return
-
-        self.current.page_index = index
-
-        self.load_pdf()
-
-    def toggle_sidebar(self):
-
-        self.sidebar.set_visible(
-            not self.sidebar.get_visible()
-        )
-
-    # ========================================================
-    # ZOOM
-    # ========================================================
-
-    def zoom(self, direction):
-
-        self.canvas.step_zoom(direction)
-
-        self.zoom_label.set_text(
-            f"{round(self.canvas.zoom * 100)}%"
-        )
-
-    def fit(self):
-
-        self.canvas.fit()
-
-        self.zoom_label.set_text("Fit")
-
-    def actual_size(self):
-
-        self.canvas.actual()
-
-        self.zoom_label.set_text("100%")
-
-    # ========================================================
-    # TEXT FORMATTING
-    # ========================================================
-
-    def get_active_text_box(self):
-
-        textbox = getattr(
-            self,
-            "active_text_box",
-            None
-        )
-
-        if textbox is None:
-            return None
-
-        return textbox
-
-    def format_selected_text(
-        self,
-        action,
-        value=None
-    ):
-
-        textbox = self.get_active_text_box()
-
-        if textbox is None:
-            return
-
-        if action == "bold":
-
-            textbox.apply_bold(
-                bool(value)
-            )
-
-        elif action == "italic":
-
-            textbox.apply_italic(
-                bool(value)
-            )
-
-        elif action == "underline":
-
-            textbox.apply_underline(
-                bool(value)
-            )
-
-        elif action == "strike":
-
-            textbox.apply_strikethrough(
-                bool(value)
-            )
-
-        elif action == "size":
-
-            textbox.apply_font_size(
-                value
-            )
-
-        elif action == "font":
-
-            textbox.apply_font_family(
-                value
-            )
-
-        elif action == "text-color":
-
-            textbox.apply_text_color(
-                value
-            )
-
-        elif action == "background-color":
-
-            textbox.apply_background_color(
-                value
-            )
-
-        self.unsaved_changes = True
-
-    # ========================================================
-    # TEXT
-    # ========================================================
-
-    def activate_text_tool(self):
-
-        if self.current is None:
-            self.message(
-                "Open an image or PDF first."
-            )
-            return
-
-        self.text_tool.activate()
-
-
-    def save(self):
-
-        if self.current is None:
-
-            self.message(
-                "Nothing to save."
-            )
-
-            return
-
-        try:
-
-            self.current.save()
-
-            self.message(
-                "Saved."
-            )
-
-        except Exception as error:
-
-            self.show_error(
-                str(error)
-            )
-
-
-    def save_as(self):
-
-        if self.current is None:
-
-            return
-
-        dialog = Gtk.FileDialog()
-
-        dialog.set_title(
-            "Save As…"
-        )
-
-        dialog.save(
-            self,
-            None,
-            self.save_as_finished
-        )
-
-
-    def save_as_finished(
-        self,
-        dialog,
-        result
-    ):
-
-        try:
-
-            file = (
-                dialog
-                .save_finish(
-                    result
-                )
-            )
-
-        except GLib.Error:
-
-            return
-
-        if file is None:
-
-            return
-
-        try:
-
-            self.current.save(
-                file.get_path()
-            )
-
-            self.message(
-                "Saved."
-            )
-
-        except Exception as error:
-
-            self.show_error(
-                str(error)
-            )
-
-
-    def add_note(self):
-
-        if self.current is None:
-            self.message(
-                "Open an image or PDF first."
-            )
-            return
-
-        if not isinstance(
-            self.current,
-            PDFDocument,
-        ):
-            self.message(
-                "Notes are available for PDF documents."
-            )
-            return
-
-        self.message(
-            "Click on the PDF to place a note."
-        )
-
-    def install_shortcuts(self):
-
-        controller = Gtk.ShortcutController()
-
-        shortcuts = [
-            (
-                "<Control>o",
-                self.open_files
+    def build_menu(self):
+        def section(*items):
+            menu = Gio.Menu()
+            for label, action, *accel in items:
+                item = Gio.MenuItem.new(label, action)
+                if accel:
+                    item.set_attribute_value("accel", GLib.Variant.new_string(accel[0]))
+                menu.append_item(item)
+            return menu
+
+        def submenu(label, *sections):
+            menu = Gio.Menu()
+            for part in sections:
+                menu.append_section(None, part)
+            return label, menu
+
+        menus = [
+            submenu(
+                _("File"),
+                section(
+                    (_("New Window"), "app.new-window"),
+                    (_("New from Clipboard"), "win.new-from-clipboard", "<Control>n"),
+                    (_("Open…"), "win.open", "<Control>o"),
+                ),
+                section(
+                    (_("Close"), "win.close", "<Control>w"),
+                    (_("Save"), "win.save", "<Control>s"),
+                    (_("Export…"), "win.export", "<Control><Shift>s"),
+                    (_("Export as PDF…"), "win.export-pdf"),
+                ),
+                section(
+                    (_("Share…"), "win.share"),
+                    (_("Show in Files"), "win.show-in-files"),
+                ),
+                section((_("Print…"), "win.print", "<Control>p")),
             ),
-            (
-                "<Control>s",
-                self.save
+            submenu(
+                _("Edit"),
+                section(
+                    (_("Undo"), "win.undo", "<Control>z"),
+                    (_("Redo"), "win.redo", "<Control><Shift>z"),
+                ),
+                section(
+                    (_("Cut"), "win.cut", "<Control>x"),
+                    (_("Copy"), "win.copy", "<Control>c"),
+                    (_("Paste"), "win.paste", "<Control>v"),
+                    (_("Delete"), "win.delete", "Delete"),
+                    (_("Select All"), "win.select-all", "<Control>a"),
+                ),
+                section(
+                    (_("Insert Blank Page"), "win.insert-blank-page"),
+                    (_("Delete Pages"), "win.delete-pages"),
+                ),
+                section((_("Find…"), "win.find", "<Control>f")),
             ),
-            (
-                "<Control>0",
-                self.actual_size
+            submenu(
+                _("View"),
+                section(
+                    (_("Content Only"), "win.hide-sidebar", "<Control><Alt>1"),
+                    (_("Thumbnails"), "win.show-sidebar", "<Control><Alt>2"),
+                ),
+                section(
+                    (_("Actual Size"), "win.actual-size", "<Control>0"),
+                    (_("Zoom to Fit"), "win.zoom-fit", "<Control>9"),
+                    (_("Zoom to Width"), "win.zoom-width"),
+                    (_("Zoom In"), "win.zoom-in", "<Control>plus"),
+                    (_("Zoom Out"), "win.zoom-out", "<Control>minus"),
+                ),
+                section(
+                    (_("Show Markup Toolbar"), "win.markup", "<Control><Shift>a"),
+                    (_("Enter Full Screen"), "win.fullscreen", "F11"),
+                ),
             ),
-            (
-                "<Control>1",
-                self.fit
-            )
+            submenu(
+                _("Go"),
+                section(
+                    (_("Previous Page"), "win.previous-page", "<Alt>Up"),
+                    (_("Next Page"), "win.next-page", "<Alt>Down"),
+                    (_("First Page"), "win.first-page", "Home"),
+                    (_("Last Page"), "win.last-page", "End"),
+                    (_("Go to Page…"), "win.go-to-page", "<Control><Alt>g"),
+                ),
+                section(
+                    (_("Previous Document"), "win.previous-document", "<Alt>Page_Up"),
+                    (_("Next Document"), "win.next-document", "<Alt>Page_Down"),
+                ),
+            ),
+            submenu(
+                _("Tools"),
+                section(
+                    (_("Inspector"), "win.inspector", "<Control>i"),
+                ),
+                section(
+                    (_("Rotate Left"), "win.rotate-left", "<Control>l"),
+                    (_("Rotate Right"), "win.rotate-right", "<Control>r"),
+                    (_("Flip Horizontal"), "win.flip-horizontal"),
+                    (_("Flip Vertical"), "win.flip-vertical"),
+                ),
+                section(
+                    (_("Highlight Text"), "win.highlight", "<Control><Shift>h"),
+                    (_("Crop"), "win.crop", "<Control>k"),
+                    (_("Adjust Color…"), "win.adjust-color", "<Control><Alt>c"),
+                    (_("Adjust Size…"), "win.adjust-size"),
+                ),
+                section(
+                    (_("Add Text"), "win.add-text"),
+                    (_("Add Rectangle"), "win.add-shape::rect"),
+                    (_("Add Oval"), "win.add-shape::oval"),
+                    (_("Add Line"), "win.add-shape::line"),
+                    (_("Add Arrow"), "win.add-shape::arrow"),
+                    (_("Add Speech Bubble"), "win.add-shape::bubble"),
+                    (_("Add Star"), "win.add-shape::star"),
+                ),
+            ),
         ]
 
-        for key, callback in shortcuts:
+        menu = Gio.Menu()
+        top = Gio.Menu()
+        for label, submenu_model in menus:
+            top.append_submenu(label, submenu_model)
+        menu.append_section(None, top)
+        menu.append_section(
+            None,
+            section(
+                (_("Keyboard Shortcuts"), "app.shortcuts"),
+                (_("About Prevux"), "app.about"),
+            ),
+        )
+        return menu
 
-            controller.add_shortcut(
-                Gtk.Shortcut.new(
-                    Gtk.ShortcutTrigger.parse_string(
-                        key
-                    ),
-                    Gtk.CallbackAction.new(
-                        lambda *args,
-                        function=callback:
-                        function()
-                    )
-                )
+    # ========================================================
+    # ACTIONS
+    # ========================================================
+
+    def install_actions(self):
+        self.actions = {}
+        simple = {
+            "open": self.open_dialog,
+            "new-from-clipboard": self.new_from_clipboard,
+            "close": self.close,
+            "save": self.save,
+            "export": self.export_dialog,
+            "export-pdf": lambda: self.export_dialog(pdf=True),
+            "print": self.print_document,
+            "share": self.share,
+            "show-in-files": self.show_in_files,
+            "undo": self.undo,
+            "redo": self.redo,
+            "cut": self.cut,
+            "copy": self.copy,
+            "paste": self.paste,
+            "delete": self.delete,
+            "select-all": self.select_all,
+            "find": lambda: self.search_entry.grab_focus(),
+            "insert-blank-page": self.insert_blank_page,
+            "delete-pages": self.delete_pages,
+            "hide-sidebar": lambda: self.split.set_show_sidebar(False),
+            "show-sidebar": lambda: self.split.set_show_sidebar(True),
+            "actual-size": lambda: self.view.set_zoom(1.0),
+            "zoom-fit": lambda: self.view.zoom_to_fit("page"),
+            "zoom-width": lambda: self.view.zoom_to_fit("width"),
+            "zoom-in": lambda: self.view.zoom_step(1),
+            "zoom-out": lambda: self.view.zoom_step(-1),
+            "markup": lambda: self.markup_button.set_active(not self.markup_button.get_active()),
+            "fullscreen": self.toggle_fullscreen,
+            "previous-page": lambda: self.go_page(self.view.current_page - 1),
+            "next-page": lambda: self.go_page(self.view.current_page + 1),
+            "first-page": lambda: self.go_page(0),
+            "last-page": lambda: self.go_page(self.doc.page_count - 1),
+            "go-to-page": self.go_to_page_dialog,
+            "previous-document": lambda: self.show_document(self.doc_index - 1),
+            "next-document": lambda: self.show_document(self.doc_index + 1),
+            "inspector": lambda: self.info_popover.popup(),
+            "rotate-left": lambda: self.rotate(-90),
+            "rotate-right": lambda: self.rotate(90),
+            "flip-horizontal": lambda: self.flip(True),
+            "flip-vertical": lambda: self.flip(False),
+            "highlight": self.highlight_now,
+            "crop": self.crop,
+            "adjust-color": self.adjust_color,
+            "adjust-size": self.adjust_size,
+            "add-text": lambda: self.view.insert_text(),
+        }
+        for name, callback in simple.items():
+            action = Gio.SimpleAction.new(name, None)
+            action.connect("activate", lambda _action, _param, function=callback: function())
+            self.add_action(action)
+            self.actions[name] = action
+
+        action = Gio.SimpleAction.new("add-shape", GLib.VariantType.new("s"))
+        action.connect("activate", lambda _action, param: self.view.insert_shape(param.get_string()))
+        self.add_action(action)
+        self.actions["add-shape"] = action
+
+    def enable(self, name, enabled):
+        self.actions[name].set_enabled(bool(enabled))
+
+    def update_state(self):
+        doc = self.doc
+        has_doc = doc is not None
+        pdf = has_doc and doc.kind == "pdf"
+        image = has_doc and doc.kind == "image"
+
+        for name in (
+            "close", "save", "export", "export-pdf", "print", "share", "show-in-files",
+            "actual-size", "zoom-fit", "zoom-width", "zoom-in", "zoom-out", "markup",
+            "rotate-left", "rotate-right", "inspector", "add-text", "add-shape", "go-to-page",
+            "first-page", "last-page", "previous-page", "next-page", "select-all",
+            "paste",
+        ):
+            self.enable(name, has_doc)
+        self.enable("close", True)
+        self.enable("undo", has_doc and doc.can_undo())
+        self.enable("redo", has_doc and doc.can_redo())
+        self.enable("find", pdf)
+        self.enable("highlight", pdf)
+        self.enable("insert-blank-page", pdf)
+        self.enable("delete-pages", pdf and doc.page_count > 1)
+        self.enable("flip-horizontal", image)
+        self.enable("flip-vertical", image)
+        self.enable("adjust-color", image)
+        self.enable("adjust-size", image)
+        self.enable("crop", has_doc and self.view.rect_selection is not None)
+        selection = has_doc and (
+            self.view.selected is not None or self.view.text_selection is not None
+            or self.view.rect_selection is not None
+        )
+        self.enable("copy", selection)
+        self.enable("cut", has_doc and self.view.selected is not None)
+        self.enable("delete", has_doc and self.view.selected is not None)
+        self.enable("previous-document", self.doc_index > 0)
+        self.enable("next-document", self.doc_index < len(self.documents) - 1)
+
+        self.search_entry.set_visible(pdf)
+        self.highlight_box.set_visible(pdf)
+        self.markup_button.set_sensitive(has_doc)
+        self.stack.set_visible_child_name("document" if has_doc else "empty")
+        if has_doc:
+            self.markup.set_document_kind(doc.kind)
+        self.update_titles()
+
+    def update_titles(self):
+        doc = self.doc
+        if doc is None:
+            self.title_label.set_text("Prevux")
+            self.subtitle_label.set_text("")
+            self.subtitle_label.set_visible(False)
+            self.set_title("Prevux")
+            return
+
+        title = doc.name
+        if doc.modified:
+            title += " — " + _("Edited")
+        self.title_label.set_text(title)
+        self.set_title(title)
+
+        if doc.kind == "pdf":
+            subtitle = _("Page {page} of {count}").format(
+                page=self.view.current_page + 1, count=doc.page_count,
             )
+        else:
+            width, height = doc.page_size(0)
+            subtitle = f"{width} × {height} px"
+        if len(self.documents) > 1:
+            subtitle += "  ·  " + _("{index} of {count} documents").format(
+                index=self.doc_index + 1, count=len(self.documents),
+            )
+        self.subtitle_label.set_text(subtitle)
+        self.subtitle_label.set_visible(True)
 
-        self.add_controller(
-            controller
+    def toast(self, text):
+        toast = Adw.Toast(title=text)
+        toast.set_timeout(2)
+        self.toasts.add_toast(toast)
+
+    # ========================================================
+    # INPUT
+    # ========================================================
+
+    def install_input(self):
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", self.on_key)
+        self.add_controller(keys)
+
+        drop = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY)
+        drop.connect("drop", self.on_drop)
+        self.stack.add_controller(drop)
+
+    def on_key(self, controller, keyval, keycode, state):
+        focus = self.get_focus()
+        if isinstance(focus, (Gtk.Text, Gtk.TextView, Gtk.SpinButton)):
+            return False
+
+        control = bool(state & Gdk.ModifierType.CONTROL_MASK)
+        shift = bool(state & Gdk.ModifierType.SHIFT_MASK)
+        alt = bool(state & Gdk.ModifierType.ALT_MASK)
+        key = Gdk.keyval_to_lower(keyval)
+
+        if control and not alt:
+            shortcuts = {
+                Gdk.KEY_z: "redo" if shift else "undo",
+                Gdk.KEY_y: "redo",
+                Gdk.KEY_c: "copy",
+                Gdk.KEY_x: "cut",
+                Gdk.KEY_v: "paste",
+                Gdk.KEY_a: "select-all",
+            }
+            if key in shortcuts:
+                self.activate_action("win." + shortcuts[key])
+                return True
+            return False
+
+        if self.doc is None or alt:
+            return False
+
+        if keyval in (Gdk.KEY_Delete, Gdk.KEY_BackSpace, Gdk.KEY_KP_Delete):
+            return self.view.delete_selected()
+
+        if keyval == Gdk.KEY_Escape:
+            if self.view.selected is not None:
+                self.view.select(None)
+            elif self.view.rect_selection or self.view.text_selection:
+                self.view.rect_selection = None
+                self.view.clear_text_selection()
+                self.view.queue_draw()
+            elif self.is_fullscreen():
+                self.unfullscreen()
+            elif self.view.tool in ("sketch", "note"):
+                self.view.set_tool("select_default")
+                self.markup.sync_tool(self.view.tool)
+            self.update_state()
+            return True
+
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            if isinstance(self.view.selected, (TextAnnotation, NoteAnnotation)):
+                self.view.start_editing(self.view.selected, self.view.selected_page)
+                return True
+
+        step = 10 if shift else 1
+        nudges = {
+            Gdk.KEY_Left: (-step, 0), Gdk.KEY_Right: (step, 0),
+            Gdk.KEY_Up: (0, -step), Gdk.KEY_Down: (0, step),
+        }
+        if keyval in nudges and self.view.selected is not None:
+            return self.view.nudge(*nudges[keyval])
+
+        if self.doc.kind == "pdf" and keyval in (Gdk.KEY_Left, Gdk.KEY_Right):
+            if self.view.fit_mode == "page" or self.view.zoom * self.doc.page_size(0)[1] < self.scroller.get_height():
+                self.go_page(self.view.current_page + (1 if keyval == Gdk.KEY_Right else -1))
+                return True
+        return False
+
+    def on_drop(self, target, value, x, y):
+        paths = [file.get_path() for file in value.get_files() if file.get_path()]
+        if paths:
+            self.get_application().open_paths(paths, self if self.doc is None else None)
+            return True
+        return False
+
+    # ========================================================
+    # DOCUMENTS
+    # ========================================================
+
+    def load_paths(self, paths):
+        opened = []
+        for path in paths:
+            try:
+                opened.append(open_document(path))
+            except PermissionError:
+                self.ask_password(path)
+            except Exception as error:
+                self.show_error(
+                    _("“{name}” could not be opened.").format(name=Path(path).name),
+                    str(error),
+                )
+        if opened:
+            self.add_documents(opened)
+
+    def add_documents(self, documents):
+        self.documents.extend(documents)
+        self.sidebar.set_documents(self.documents)
+        self.show_document(len(self.documents) - len(documents))
+        if len(self.documents) > 1 or documents[0].page_count > 1:
+            self.split.set_show_sidebar(True)
+        for doc in documents:
+            self.get_application().note_recent(doc.path)
+
+    def show_document(self, index):
+        if not 0 <= index < len(self.documents):
+            return
+        if index == self.doc_index:
+            return
+        self.view.finish_editing()
+        self.doc_index = index
+        doc = self.doc
+        self.defaults.set_document(doc)
+        self.view.set_document(doc)
+        self.view.set_tool("select_default")
+        self.markup.sync_tool(self.view.tool)
+        self.search_results = []
+        self.search_entry.set_text("")
+        self.sidebar.select_page(index, 0)
+        self.update_state()
+
+    def ask_password(self, path):
+        dialog = Adw.AlertDialog(
+            heading=_("“{name}” is password protected").format(name=Path(path).name),
+            body=_("Enter the password to open this document."),
         )
+        entry = Gtk.PasswordEntry(show_peek_icon=True, activates_default=True)
+        dialog.set_extra_child(entry)
+        dialog.add_response("cancel", _("Cancel"))
+        dialog.add_response("open", _("Open"))
+        dialog.set_response_appearance("open", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("open")
 
+        def on_response(dialog, response):
+            if response != "open":
+                return
+            try:
+                doc = PDFDocument(path, entry.get_text())
+            except PermissionError:
+                self.toast(_("Wrong password."))
+                self.ask_password(path)
+                return
+            self.add_documents([doc])
 
-    def message(self, text):
+        dialog.connect("response", on_response)
+        dialog.present(self)
 
-        self.status.set_text(text)
+    def open_dialog(self):
+        dialog = Gtk.FileDialog(title=_("Open"))
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        supported = Gtk.FileFilter(name=_("Images and PDFs"))
+        for suffix in sorted(IMAGE_EXTENSIONS | PDF_EXTENSIONS):
+            supported.add_suffix(suffix[1:])
+        filters.append(supported)
+        dialog.set_filters(filters)
+        dialog.set_default_filter(supported)
+        if self.doc is not None:
+            dialog.set_initial_folder(Gio.File.new_for_path(str(Path(self.doc.path).parent)))
+        dialog.open_multiple(self, None, self.on_open_finished)
 
-    def show_error(self, text):
+    def on_open_finished(self, dialog, result):
+        try:
+            files = dialog.open_multiple_finish(result)
+        except GLib.Error:
+            return
+        paths = [
+            files.get_item(index).get_path()
+            for index in range(files.get_n_items())
+            if files.get_item(index).get_path()
+        ]
+        if paths:
+            self.get_application().open_paths(paths, self if self.doc is None else None)
 
-        print("Prevux:", text)
+    def new_from_clipboard(self):
+        clipboard = self.get_clipboard()
+        clipboard.read_texture_async(None, self.on_clipboard_texture)
 
-        dialog = Gtk.AlertDialog(
-            message=text
+    def on_clipboard_texture(self, clipboard, result):
+        try:
+            texture = clipboard.read_texture_finish(result)
+        except GLib.Error:
+            texture = None
+        if texture is None:
+            self.toast(_("The clipboard contains no image."))
+            return
+        folder = Path(tempfile.mkdtemp(prefix="prevux-"))
+        path = folder / (_("Untitled") + ".png")
+        texture.save_to_png(str(path))
+        doc = ImageDocument(path)
+        doc.untitled = True
+        target = self if self.doc is None else self.get_application().new_window()
+        target.add_documents([doc])
+        target.present()
+
+    # ========================================================
+    # SAVING
+    # ========================================================
+
+    def save(self, then=None):
+        doc = self.doc
+        if doc is None:
+            return
+        self.view.finish_editing()
+        if getattr(doc, "untitled", False):
+            self.export_dialog(then=then)
+            return
+        try:
+            doc.save()
+        except Exception as error:
+            self.show_error(_("The document could not be saved."), str(error))
+            return
+        self.after_save(doc)
+        if then:
+            then()
+
+    def after_save(self, doc):
+        doc.untitled = False
+        self.sidebar.set_documents(self.documents)
+        self.sidebar.select_page(self.doc_index, self.view.current_page)
+        self.update_state()
+        self.toast(_("Saved"))
+
+    def export_dialog(self, pdf=False, then=None):
+        doc = self.doc
+        if doc is None:
+            return
+        self.view.finish_editing()
+        stem = Path(doc.name).stem
+        suffix = ".pdf" if pdf else Path(doc.name).suffix.lower()
+
+        dialog = Gtk.FileDialog(title=_("Export as PDF") if pdf else _("Export"))
+        dialog.set_initial_name(stem + suffix)
+        if not getattr(doc, "untitled", False):
+            dialog.set_initial_folder(Gio.File.new_for_path(str(Path(doc.path).parent)))
+
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        formats = [("PDF", ".pdf")] if pdf else (
+            EXPORT_FORMATS if doc.kind == "image" else [("PDF", ".pdf"), ("PNG", ".png"), ("JPEG", ".jpg")]
         )
+        for name, extension in formats:
+            file_filter = Gtk.FileFilter(name=name)
+            file_filter.add_suffix(extension[1:])
+            if extension == ".jpg":
+                file_filter.add_suffix("jpeg")
+            if extension == ".tiff":
+                file_filter.add_suffix("tif")
+            filters.append(file_filter)
+        dialog.set_filters(filters)
+        dialog.save(self, None, self.on_export_finished, doc, then)
 
-        dialog.show(self)
+    def on_export_finished(self, dialog, result, doc, then):
+        try:
+            file = dialog.save_finish(result)
+        except GLib.Error:
+            return
+        path = file.get_path()
+        suffix = Path(path).suffix.lower()
+        known = {extension for _name, extension in EXPORT_FORMATS} | {".jpeg", ".tif"}
+        if suffix not in known:
+            path += ".pdf" if doc.kind == "pdf" else ".png"
+            suffix = Path(path).suffix.lower()
+
+        try:
+            if doc.kind == "pdf" and suffix != ".pdf":
+                format_name = "JPEG" if suffix in (".jpg", ".jpeg") else "PNG"
+                doc.save_page_image(path, format_name, self.view.current_page)
+                self.toast(_("Exported"))
+                return
+            if doc.kind == "image" and suffix == ".pdf":
+                doc.save(path, "PDF")
+                self.toast(_("Exported"))
+                return
+            doc.save(path)
+        except Exception as error:
+            self.show_error(_("The document could not be exported."), str(error))
+            return
+        self.after_save(doc)
+        if then:
+            then()
+
+    def share(self):
+        doc = self.doc
+        if doc is None:
+            return
+        launcher = Gtk.FileLauncher(file=Gio.File.new_for_path(doc.path))
+        launcher.set_always_ask(True)
+        launcher.launch(self, None, None)
+
+    def show_in_files(self):
+        doc = self.doc
+        if doc is None:
+            return
+        launcher = Gtk.FileLauncher(file=Gio.File.new_for_path(doc.path))
+        launcher.open_containing_folder(self, None, None)
+
+    def print_document(self):
+        doc = self.doc
+        if doc is None:
+            return
+        self.view.finish_editing()
+        operation = Gtk.PrintOperation()
+        operation.set_job_name(doc.name)
+        operation.set_n_pages(doc.page_count)
+        operation.set_embed_page_setup(True)
+        operation.connect("draw-page", self.on_draw_page, doc)
+        try:
+            operation.run(Gtk.PrintOperationAction.PRINT_DIALOG, self)
+        except GLib.Error as error:
+            self.show_error(_("Printing failed."), str(error))
+
+    def on_draw_page(self, operation, context, page, doc):
+        cr = context.get_cairo_context()
+        width, height = context.get_width(), context.get_height()
+        page_width, page_height = doc.page_size(page)
+        scale = min(width / page_width, height / page_height)
+
+        if doc.kind == "pdf":
+            import pymupdf
+            dpi_scale = min(300 / 72, 6000 / max(page_width, page_height))
+            pixmap = doc.doc[page].get_pixmap(matrix=pymupdf.Matrix(dpi_scale, dpi_scale), alpha=False)
+            image = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
+        else:
+            image = doc.image
+            dpi_scale = 1.0
+
+        surface, _data = pil_to_surface(image)
+        cr.translate((width - page_width * scale) / 2, (height - page_height * scale) / 2)
+        cr.scale(scale, scale)
+        cr.save()
+        cr.scale(1 / dpi_scale, 1 / dpi_scale)
+        cr.set_source_surface(surface, 0, 0)
+        cr.paint()
+        cr.restore()
+        doc.render_annotations(cr, page)
+
+    # ========================================================
+    # CLOSING
+    # ========================================================
+
+    def do_close_request(self):
+        if self.force_close:
+            return False
+        self.view.finish_editing()
+        modified = [doc for doc in self.documents if doc.modified]
+        if not modified:
+            return False
+
+        doc = modified[0]
+        self.show_document(self.documents.index(doc))
+        dialog = Adw.AlertDialog(
+            heading=_("Do you want to keep the changes you made to “{name}”?").format(name=doc.name),
+            body=_("Your changes will be lost if you don’t save them."),
+        )
+        dialog.add_response("discard", _("Don’t Save"))
+        dialog.add_response("cancel", _("Cancel"))
+        dialog.add_response("save", _("Save"))
+        dialog.set_response_appearance("discard", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("save")
+        dialog.set_close_response("cancel")
+        dialog.connect("response", self.on_close_response, doc)
+        dialog.present(self)
+        return True
+
+    def on_close_response(self, dialog, response, doc):
+        if response == "cancel":
+            return
+        if response == "discard":
+            doc.modified = False
+            self.close()
+            return
+        self.save(then=self.close)
+
+    # ========================================================
+    # EDITING
+    # ========================================================
+
+    def after_edit(self, structure=False):
+        doc = self.doc
+        if structure:
+            self.view.document_structure_changed()
+            self.sidebar.set_documents(self.documents)
+            self.sidebar.select_page(self.doc_index, self.view.current_page)
+        else:
+            self.sidebar.refresh_document(self.doc_index, [self.view.current_page])
+        self.view.refresh()
+        doc.modified = True
+        self.update_state()
+
+    def undo(self):
+        self.history(True)
+
+    def redo(self):
+        self.history(False)
+
+    def history(self, undo):
+        doc = self.doc
+        if doc is None:
+            return
+        self.view.finish_editing()
+        pages = doc.page_count
+        size = doc.page_size(0)
+        (doc.undo if undo else doc.redo)()
+        self.view.refresh()
+        if doc.page_count != pages or doc.page_size(0) != size or doc.kind == "image":
+            self.view.document_structure_changed()
+            self.sidebar.set_documents(self.documents)
+        else:
+            self.sidebar.refresh_document(self.doc_index)
+        self.update_state()
+
+    def copy(self):
+        view = self.view
+        clipboard = self.get_clipboard()
+        if view.text_selection:
+            clipboard.set(view.selected_text())
+        elif view.selected is not None:
+            self.get_application().clipboard_annotation = view.selected.clone()
+            clipboard.set(getattr(view.selected, "text", "") or " ")
+            self.get_application().clipboard_marker = clipboard.get_content()
+        elif view.rect_selection and self.doc.kind == "image":
+            _page, x0, y0, x1, y1 = view.rect_selection
+            box = tuple(int(round(value)) for value in (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)))
+            from .documents import pil_to_texture
+            clipboard.set(pil_to_texture(self.doc.composited().crop(box)))
+
+    def cut(self):
+        if self.view.selected is not None:
+            self.copy()
+            self.view.delete_selected()
+            self.update_state()
+
+    def paste(self):
+        app = self.get_application()
+        annotation = getattr(app, "clipboard_annotation", None)
+        clipboard = self.get_clipboard()
+        if annotation is not None and clipboard.get_content() is getattr(app, "clipboard_marker", None):
+            copy = annotation.clone()
+            offset = 12 / self.view.zoom
+            copy.move(offset, offset)
+            app.clipboard_annotation = copy
+            self.view.insert(copy, self.view.current_page)
+            self.update_state()
+            return
+        self.new_from_clipboard()
+
+    def delete(self):
+        self.view.delete_selected()
+        self.update_state()
+
+    def select_all(self):
+        if self.doc is not None and self.doc.kind == "pdf":
+            self.view.select_all_text()
+        elif self.doc is not None:
+            width, height = self.doc.page_size(0)
+            self.view.rect_selection = (0, 0, 0, width, height)
+            self.view.queue_draw()
+        self.update_state()
+
+    def rotate(self, degrees):
+        doc = self.doc
+        if doc is None:
+            return
+        self.view.finish_editing()
+        pages = [page for doc_index, page in self.sidebar.selected_pages() if doc_index == self.doc_index]
+        if doc.kind != "pdf" or not pages:
+            pages = [self.view.current_page]
+        doc.checkpoint(structure=doc.kind == "image")
+        for page in pages:
+            doc.rotate_page(page, degrees)
+        self.view.rect_selection = None
+        self.after_edit(structure=True)
+
+    def flip(self, horizontal):
+        doc = self.doc
+        if doc is None or doc.kind != "image":
+            return
+        doc.checkpoint(structure=True)
+        doc.flip(horizontal)
+        self.after_edit(structure=True)
+
+    def crop(self):
+        doc = self.doc
+        if doc is None:
+            return
+        if self.view.rect_selection is None:
+            self.toast(_("Select an area with Rectangular Selection first."))
+            return
+        page, x0, y0, x1, y1 = self.view.rect_selection
+        doc.checkpoint(structure=True)
+        doc.crop(page, (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)))
+        self.view.rect_selection = None
+        self.after_edit(structure=True)
+
+    def insert_blank_page(self):
+        doc = self.doc
+        if doc is None or doc.kind != "pdf":
+            return
+        doc.checkpoint(structure=True)
+        doc.insert_blank_page(self.view.current_page + 1)
+        self.after_edit(structure=True)
+        self.go_page(self.view.current_page + 1)
+
+    def delete_pages(self):
+        doc = self.doc
+        if doc is None or doc.kind != "pdf":
+            return
+        pages = [page for doc_index, page in self.sidebar.selected_pages() if doc_index == self.doc_index]
+        if not pages:
+            pages = [self.view.current_page]
+        if len(pages) >= doc.page_count:
+            self.toast(_("A PDF needs at least one page."))
+            return
+        doc.checkpoint(structure=True)
+        doc.delete_pages(pages)
+        self.after_edit(structure=True)
+
+    def on_move_page(self, sidebar, doc_index, source, target):
+        doc = self.documents[doc_index]
+        if doc.kind != "pdf":
+            return
+        if doc_index != self.doc_index:
+            self.show_document(doc_index)
+        doc.checkpoint(structure=True)
+        doc.move_page(source, target)
+        self.after_edit(structure=True)
+        self.sidebar.select_page(doc_index, target)
+
+    # ========================================================
+    # HIGHLIGHT
+    # ========================================================
+
+    def on_highlight_toggled(self, button):
+        if button.get_active():
+            self.view.highlight_mode = self.highlight_choice
+            if self.view.text_selection:
+                self.view.add_markup(*self.highlight_choice)
+            if self.view.tool != "text-select":
+                self.view.set_tool("text-select")
+                self.markup.sync_tool(self.view.tool)
+        else:
+            self.view.highlight_mode = None
+
+    def on_highlight_choice(self, button, choice, popover):
+        popover.popdown()
+        self.highlight_choice = choice
+        if self.highlight_button.get_active():
+            self.view.highlight_mode = choice
+            if self.view.text_selection:
+                self.view.add_markup(*choice)
+        else:
+            self.highlight_button.set_active(True)
+
+    def highlight_now(self):
+        if self.view.text_selection:
+            self.view.add_markup(*self.highlight_choice)
+        else:
+            self.highlight_button.set_active(not self.highlight_button.get_active())
+
+    # ========================================================
+    # NAVIGATION
+    # ========================================================
+
+    def go_page(self, page):
+        doc = self.doc
+        if doc is None:
+            return
+        page = max(0, min(doc.page_count - 1, page))
+        self.view.scroll_to_page(page)
+
+    def on_view_page_changed(self, view, page):
+        self.sidebar.select_page(self.doc_index, page)
+        self.update_titles()
+
+    def on_page_activated(self, sidebar, doc_index, page):
+        if doc_index != self.doc_index:
+            self.show_document(doc_index)
+        self.view.scroll_to_page(page)
+
+    def go_to_page_dialog(self):
+        doc = self.doc
+        if doc is None:
+            return
+        dialog = Adw.AlertDialog(heading=_("Go to Page"))
+        spin = Gtk.SpinButton.new_with_range(1, doc.page_count, 1)
+        spin.set_value(self.view.current_page + 1)
+        spin.set_activates_default(True)
+        dialog.set_extra_child(spin)
+        dialog.add_response("cancel", _("Cancel"))
+        dialog.add_response("go", _("Go"))
+        dialog.set_response_appearance("go", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("go")
+        dialog.connect(
+            "response",
+            lambda _dialog, response: response == "go" and self.go_page(int(spin.get_value()) - 1),
+        )
+        dialog.present(self)
+
+    def toggle_fullscreen(self):
+        if self.is_fullscreen():
+            self.unfullscreen()
+        else:
+            self.fullscreen()
+
+    # ========================================================
+    # SEARCH
+    # ========================================================
+
+    def on_search_changed(self, entry):
+        doc = self.doc
+        text = entry.get_text().strip()
+        if doc is None or doc.kind != "pdf" or not text:
+            self.view.search_hits = []
+            self.view.search_current = -1
+            self.view.queue_draw()
+            return
+        self.view.search_hits = doc.search(text)
+        self.view.search_current = -1
+        if self.view.search_hits:
+            self.search_step(1)
+        else:
+            self.view.queue_draw()
+            self.toast(_("No results"))
+
+    def search_step(self, direction):
+        hits = self.view.search_hits
+        if not hits:
+            return
+        self.view.search_current = (self.view.search_current + direction) % len(hits)
+        page, rect = hits[self.view.search_current]
+        self.view.scroll_to_page(page, rect[1])
+        self.view.queue_draw()
+
+    def on_stop_search(self, entry):
+        entry.set_text("")
+        self.view.grab_focus()
+
+    # ========================================================
+    # VIEW EVENTS
+    # ========================================================
+
+    def on_view_selection_changed(self, view):
+        self.markup.update_color_icons()
+        self.markup.sync_tool(view.tool)
+        self.update_state()
+
+    def on_view_modified(self, view):
+        if self.doc is not None:
+            self.sidebar.refresh_document(self.doc_index, [view.selected_page, view.current_page])
+        self.update_state()
+
+    def on_markup_toggled(self, button):
+        active = button.get_active()
+        self.markup_revealer.set_reveal_child(active)
+        if not active:
+            self.view.finish_editing()
+            if self.view.tool in ("sketch", "note"):
+                self.view.set_tool("select_default")
+                self.markup.sync_tool(self.view.tool)
+
+    # ========================================================
+    # INSPECTOR
+    # ========================================================
+
+    def fill_info(self):
+        doc = self.doc
+        box = popover_box(spacing=4, margin=14)
+        box.set_size_request(260, -1)
+        if doc is None:
+            self.info_popover.set_child(box)
+            return
+
+        info = doc.info()
+        title = Gtk.Label(label=doc.name, xalign=0, wrap=True, max_width_chars=30)
+        title.add_css_class("heading")
+        box.append(title)
+
+        grid = Gtk.Grid(column_spacing=12, row_spacing=4)
+        grid.set_margin_top(6)
+        rows = [
+            (_("Kind"), info.get("type", "")),
+            (_("Size"), GLib.format_size(info["size"])),
+            (_("Dimensions"), info.get("dimensions", "")),
+        ]
+        if "pages" in info:
+            rows.append((_("Pages"), str(info["pages"])))
+        if info.get("title"):
+            rows.append((_("Title"), info["title"]))
+        if info.get("author"):
+            rows.append((_("Author"), info["author"]))
+        rows.append((_("Where"), str(Path(info["path"]).parent)))
+
+        for row, (label, value) in enumerate(rows):
+            key = Gtk.Label(label=label, xalign=1, yalign=0)
+            key.add_css_class("dim-label")
+            grid.attach(key, 0, row, 1, 1)
+            content = Gtk.Label(label=value, xalign=0, wrap=True, selectable=True, max_width_chars=28)
+            content.set_wrap_mode(2)
+            grid.attach(content, 1, row, 1, 1)
+        box.append(grid)
+        self.info_popover.set_child(box)
+
+    # ========================================================
+    # IMAGE ADJUSTMENTS
+    # ========================================================
+
+    def adjust_size(self):
+        doc = self.doc
+        if doc is None or doc.kind != "image":
+            return
+        AdjustSizeDialog(self, doc).present(self)
+
+    def adjust_color(self):
+        doc = self.doc
+        if doc is None or doc.kind != "image":
+            return
+        AdjustColorDialog(self, doc).present(self)
+
+    # ========================================================
+    # ERRORS
+    # ========================================================
+
+    def show_error(self, heading, body=""):
+        print("Prevux:", heading, body)
+        dialog = Adw.AlertDialog(heading=heading, body=body)
+        dialog.add_response("ok", _("OK"))
+        dialog.present(self)
+
+
+# ============================================================
+# ADJUST SIZE
+# ============================================================
+
+class AdjustSizeDialog(Adw.Dialog):
+
+    def __init__(self, window, doc):
+        super().__init__(title=_("Adjust Size"))
+        self.window = window
+        self.doc = doc
+        self.width, self.height = doc.page_size(0)
+        self.updating = False
+        self.set_content_width(360)
+
+        view = Adw.ToolbarView()
+        view.add_top_bar(Adw.HeaderBar())
+
+        page = Adw.PreferencesPage()
+        group = Adw.PreferencesGroup()
+
+        self.unit = Adw.ComboRow(title=_("Unit"), model=Gtk.StringList.new([_("Pixels"), _("Percent")]))
+        self.unit.connect("notify::selected", self.on_unit)
+        group.add(self.unit)
+
+        self.width_row = Adw.SpinRow.new_with_range(1, 100000, 1)
+        self.width_row.set_title(_("Width"))
+        self.width_row.set_value(self.width)
+        self.width_row.connect("notify::value", self.on_value, "width")
+        group.add(self.width_row)
+
+        self.height_row = Adw.SpinRow.new_with_range(1, 100000, 1)
+        self.height_row.set_title(_("Height"))
+        self.height_row.set_value(self.height)
+        self.height_row.connect("notify::value", self.on_value, "height")
+        group.add(self.height_row)
+
+        self.proportional = Adw.SwitchRow(title=_("Scale proportionally"), active=True)
+        group.add(self.proportional)
+
+        self.result = Adw.ActionRow(title=_("Resulting Size"))
+        self.result.add_css_class("property")
+        group.add(self.result)
+        page.add(group)
+
+        buttons = Gtk.Box(spacing=8, halign=Gtk.Align.END)
+        buttons.set_margin_end(12)
+        buttons.set_margin_bottom(12)
+        cancel = Gtk.Button(label=_("Cancel"))
+        cancel.connect("clicked", lambda _button: self.close())
+        apply = Gtk.Button(label=_("OK"))
+        apply.add_css_class("suggested-action")
+        apply.connect("clicked", self.on_apply)
+        buttons.append(cancel)
+        buttons.append(apply)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.append(page)
+        box.append(buttons)
+        view.set_content(box)
+        self.set_child(view)
+        self.update_result()
+
+    def percent(self):
+        return self.unit.get_selected() == 1
+
+    def target(self):
+        width = self.width_row.get_value()
+        height = self.height_row.get_value()
+        if self.percent():
+            width = self.width * width / 100
+            height = self.height * height / 100
+        return max(1, int(round(width))), max(1, int(round(height)))
+
+    def on_unit(self, row, _param):
+        self.updating = True
+        if self.percent():
+            self.width_row.set_value(100)
+            self.height_row.set_value(100)
+        else:
+            self.width_row.set_value(self.width)
+            self.height_row.set_value(self.height)
+        self.updating = False
+        self.update_result()
+
+    def on_value(self, row, _param, which):
+        if self.updating:
+            return
+        if self.proportional.get_active():
+            self.updating = True
+            value = row.get_value()
+            if self.percent():
+                other = value
+            elif which == "width":
+                other = value * self.height / self.width
+            else:
+                other = value * self.width / self.height
+            (self.height_row if which == "width" else self.width_row).set_value(round(other))
+            self.updating = False
+        self.update_result()
+
+    def update_result(self):
+        width, height = self.target()
+        self.result.set_subtitle(f"{width} × {height} px")
+
+    def on_apply(self, button):
+        width, height = self.target()
+        if (width, height) != (self.width, self.height):
+            self.doc.checkpoint(structure=True)
+            self.doc.resize(width, height)
+            self.window.after_edit(structure=True)
+        self.close()
+
+
+# ============================================================
+# ADJUST COLOR
+# ============================================================
+
+class AdjustColorDialog(Adw.Dialog):
+
+    SLIDERS = [
+        ("exposure", "Exposure", -1.0, 1.0),
+        ("contrast", "Contrast", -1.0, 1.0),
+        ("saturation", "Saturation", -1.0, 1.0),
+        ("temperature", "Temperature", -1.0, 1.0),
+        ("sharpness", "Sharpness", -1.0, 1.0),
+    ]
+
+    def __init__(self, window, doc):
+        super().__init__(title=_("Adjust Color"))
+        self.window = window
+        self.doc = doc
+        self.original = doc.image.copy()
+        self.values = {key: 0.0 for key, *_rest in self.SLIDERS}
+        self.source = None
+        self.applied = False
+        self.set_content_width(380)
+
+        view = Adw.ToolbarView()
+        view.add_top_bar(Adw.HeaderBar())
+        box = popover_box(spacing=10, margin=18)
+
+        self.scales = {}
+        for key, label, low, high in self.SLIDERS:
+            title = Gtk.Label(label=_(label), xalign=0)
+            box.append(title)
+            scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, low, high, 0.01)
+            scale.set_value(0)
+            scale.add_mark(0, Gtk.PositionType.BOTTOM, None)
+            scale.connect("value-changed", self.on_changed, key)
+            self.scales[key] = scale
+            box.append(scale)
+
+        buttons = Gtk.Box(spacing=8)
+        auto = Gtk.Button(label=_("Auto Levels"))
+        auto.connect("clicked", self.on_auto)
+        buttons.append(auto)
+        reset = Gtk.Button(label=_("Reset All"))
+        reset.connect("clicked", self.on_reset)
+        buttons.append(reset)
+        spacer = Gtk.Box(hexpand=True)
+        buttons.append(spacer)
+        done = Gtk.Button(label=_("Done"))
+        done.add_css_class("suggested-action")
+        done.connect("clicked", self.on_done)
+        buttons.append(done)
+        box.append(buttons)
+
+        view.set_content(box)
+        self.set_child(view)
+        self.connect("closed", self.on_closed)
+        self.auto = False
+
+    def on_changed(self, scale, key):
+        self.values[key] = scale.get_value()
+        if self.source is None:
+            self.source = GLib.timeout_add(120, self.apply_preview)
+
+    def on_auto(self, button):
+        self.auto = True
+        self.apply_preview()
+
+    def on_reset(self, button):
+        self.auto = False
+        for scale in self.scales.values():
+            scale.set_value(0)
+        self.apply_preview()
+
+    def adjusted(self):
+        image = self.original
+        alpha = image.getchannel("A") if image.mode == "RGBA" else None
+        image = image.convert("RGB")
+        if self.auto:
+            image = ImageOps.autocontrast(image, cutoff=0.5)
+        values = self.values
+        if values["exposure"]:
+            image = ImageEnhance.Brightness(image).enhance(2 ** values["exposure"])
+        if values["contrast"]:
+            image = ImageEnhance.Contrast(image).enhance(1 + values["contrast"])
+        if values["saturation"]:
+            image = ImageEnhance.Color(image).enhance(1 + values["saturation"])
+        if values["temperature"]:
+            amount = values["temperature"] * 0.15
+            red, green, blue = image.split()
+            red = red.point(lambda value: min(255, max(0, value * (1 + amount))))
+            blue = blue.point(lambda value: min(255, max(0, value * (1 - amount))))
+            image = Image.merge("RGB", (red, green, blue))
+        if values["sharpness"]:
+            image = ImageEnhance.Sharpness(image).enhance(1 + values["sharpness"] * 2)
+        if alpha is not None:
+            image.putalpha(alpha)
+        return image
+
+    def apply_preview(self):
+        self.source = None
+        self.doc.image = self.adjusted()
+        self.doc.changed()
+        self.window.view.queue_draw()
+        return False
+
+    def on_done(self, button):
+        self.applied = True
+        adjusted = self.adjusted()
+        self.doc.image = self.original
+        self.doc.checkpoint(structure=True)
+        self.doc.image = adjusted
+        self.doc.changed()
+        self.window.after_edit(structure=True)
+        self.close()
+
+    def on_closed(self, dialog):
+        if self.source is not None:
+            GLib.source_remove(self.source)
+            self.source = None
+        if not self.applied:
+            self.doc.image = self.original
+            self.doc.changed()
+            self.window.view.queue_draw()
