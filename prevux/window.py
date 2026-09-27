@@ -41,6 +41,14 @@ EXPORT_FORMATS = [
 ]
 
 
+def slot(widget):
+    """A wrapper whose visibility the breakpoints control, independent of
+    the child's own (document-dependent) visibility."""
+    box = Gtk.Box()
+    box.append(widget)
+    return box
+
+
 class PrevuxWindow(Adw.ApplicationWindow):
 
     def __init__(self, app):
@@ -98,7 +106,8 @@ class PrevuxWindow(Adw.ApplicationWindow):
 
         header = Adw.HeaderBar()
         header.set_decoration_layout(DECORATION_LAYOUT)
-        header.set_title_widget(Gtk.Box())
+        start_items = []
+        end_items = []
         self.split.bind_property(
             "show-sidebar", header, "show-start-title-buttons",
             GObject.BindingFlags.SYNC_CREATE | GObject.BindingFlags.INVERT_BOOLEAN,
@@ -109,37 +118,54 @@ class PrevuxWindow(Adw.ApplicationWindow):
             "show-sidebar", self.sidebar_button, "active",
             GObject.BindingFlags.SYNC_CREATE | GObject.BindingFlags.BIDIRECTIONAL,
         )
-        header.pack_start(self.sidebar_button)
+        start_items.append(self.sidebar_button)
 
         titles = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER)
         titles.set_margin_start(6)
-        self.title_label = Gtk.Label(xalign=0, ellipsize=3)
+        self.title_label = Gtk.Label(xalign=0, ellipsize=3, width_chars=6)
         self.title_label.add_css_class("document-title")
         self.subtitle_label = Gtk.Label(xalign=0, ellipsize=3)
         self.subtitle_label.add_css_class("document-subtitle")
         titles.append(self.title_label)
         titles.append(self.subtitle_label)
-        header.pack_start(titles)
+        start_items.append(titles)
 
         # Trailing items, packed from the right edge inwards.
         menu_button = icon_menu_button("more", _("Menu"))
         menu_button.set_menu_model(self.build_menu())
-        header.pack_end(menu_button)
+        end_items.append(menu_button)
 
         self.search_entry = Gtk.SearchEntry(placeholder_text=_("Search"))
         self.search_entry.set_size_request(170, -1)
         self.search_entry.connect("search-changed", self.on_search_changed)
         self.search_entry.connect("activate", lambda _entry: self.search_step(1))
         self.search_entry.connect("stop-search", self.on_stop_search)
-        header.pack_end(self.search_entry)
+        self.search_slot = slot(self.search_entry)
+        end_items.append(self.search_slot)
+
+        # In narrow windows the search field moves into a popover.
+        compact_entry = Gtk.SearchEntry(placeholder_text=_("Search"))
+        compact_entry.set_size_request(220, -1)
+        compact_entry.connect("activate", lambda _entry: self.search_step(1))
+        compact_entry.connect("stop-search", self.on_stop_search)
+        self.search_entry.bind_property(
+            "text", compact_entry, "text",
+            GObject.BindingFlags.SYNC_CREATE | GObject.BindingFlags.BIDIRECTIONAL,
+        )
+        compact_popover = Gtk.Popover(child=compact_entry)
+        compact_popover.connect("show", lambda _popover: compact_entry.grab_focus())
+        self.compact_search = icon_menu_button("search", _("Search"), compact_popover)
+        self.compact_search_slot = slot(self.compact_search)
+        self.compact_search_slot.set_visible(False)
+        end_items.append(self.compact_search_slot)
 
         self.markup_button = icon_button("markup", _("Show Markup Toolbar"), toggle=True)
         self.markup_button.connect("toggled", self.on_markup_toggled)
-        header.pack_end(self.markup_button)
+        end_items.append(self.markup_button)
 
         rotate = icon_button("rotate", _("Rotate"))
         rotate.set_action_name("win.rotate-left")
-        header.pack_end(rotate)
+        end_items.append(rotate)
 
         self.highlight_box = Gtk.Box()
         self.highlight_button = icon_button("highlight", _("Highlight"), toggle=True)
@@ -150,11 +176,12 @@ class PrevuxWindow(Adw.ApplicationWindow):
         highlight_menu.add_css_class("narrow-arrow")
         highlight_menu.set_tooltip_text(_("Highlight Color"))
         self.highlight_box.append(highlight_menu)
-        header.pack_end(self.highlight_box)
+        highlight_slot = slot(self.highlight_box)
+        end_items.append(highlight_slot)
 
         share = icon_button("share", _("Share"))
         share.set_action_name("win.share")
-        header.pack_end(share)
+        end_items.append(share)
 
         zoom_box = Gtk.Box()
         zoom_box.add_css_class("linked")
@@ -164,14 +191,41 @@ class PrevuxWindow(Adw.ApplicationWindow):
         zoom_in.set_action_name("win.zoom-in")
         zoom_box.append(zoom_out)
         zoom_box.append(zoom_in)
-        header.pack_end(zoom_box)
+        end_items.append(zoom_box)
 
         self.info_popover = Gtk.Popover()
         self.info_popover.connect("show", lambda _popover: self.fill_info())
         info = icon_menu_button("info", _("Inspector"), self.info_popover)
-        header.pack_end(info)
+        end_items.append(info)
+
+        # One row for title and items: the title shrinks with an ellipsis
+        # instead of sliding under the buttons.
+        bar = Gtk.Box(spacing=6, hexpand=True)
+        for widget in start_items:
+            bar.append(widget)
+        titles.set_hexpand(True)
+        for widget in reversed(end_items):
+            bar.append(widget)
+        header.set_title_widget(bar)
 
         content_view.add_top_bar(header)
+
+        # Like a Mac toolbar, less important items give way when space
+        # runs out; everything stays reachable through the menu.
+        self.content_bin = Adw.BreakpointBin(child=content_view)
+        self.content_bin.set_size_request(360, 240)
+        for width, hidden in (
+            (900, [share, self.search_slot]),
+            (740, [share, self.search_slot, zoom_box, info]),
+            (580, [share, self.search_slot, zoom_box, info, rotate, highlight_slot]),
+        ):
+            breakpoint = Adw.Breakpoint.new(
+                Adw.BreakpointCondition.parse(f"max-width: {width}px")
+            )
+            for widget in hidden:
+                breakpoint.add_setter(widget, "visible", False)
+            breakpoint.add_setter(self.compact_search_slot, "visible", True)
+            self.content_bin.add_breakpoint(breakpoint)
 
         self.markup = MarkupToolbar(self)
         markup_scroller = Gtk.ScrolledWindow(child=self.markup)
@@ -208,7 +262,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
 
         self.toasts = Adw.ToastOverlay(child=self.stack)
         content_view.set_content(self.toasts)
-        self.split.set_content(content_view)
+        self.split.set_content(self.content_bin)
         self.set_content(self.split)
 
     def build_highlight_popover(self):
@@ -386,7 +440,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
             "paste": self.paste,
             "delete": self.delete,
             "select-all": self.select_all,
-            "find": lambda: self.search_entry.grab_focus(),
+            "find": self.focus_search,
             "insert-blank-page": self.insert_blank_page,
             "delete-pages": self.delete_pages,
             "hide-sidebar": lambda: self.split.set_show_sidebar(False),
@@ -467,6 +521,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.enable("next-document", self.doc_index < len(self.documents) - 1)
 
         self.search_entry.set_visible(pdf)
+        self.compact_search.set_visible(pdf)
         self.highlight_box.set_visible(pdf)
         self.markup_button.set_sensitive(has_doc)
         self.stack.set_visible_child_name("document" if has_doc else "empty")
@@ -1148,6 +1203,12 @@ class PrevuxWindow(Adw.ApplicationWindow):
         page, rect = hits[self.view.search_current]
         self.view.scroll_to_page(page, rect[1])
         self.view.queue_draw()
+
+    def focus_search(self):
+        if self.search_slot.get_visible():
+            self.search_entry.grab_focus()
+        else:
+            self.compact_search.popup()
 
     def on_stop_search(self, entry):
         entry.set_text("")

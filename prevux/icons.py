@@ -60,6 +60,10 @@ def icon_zoom_out(cr):
     _stroke(cr)
 
 
+def icon_search(cr):
+    _magnifier(cr)
+
+
 def icon_info(cr):
     cr.arc(8, 8, 6.5, 0, 2 * math.pi)
     _stroke(cr)
