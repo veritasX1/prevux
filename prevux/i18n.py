@@ -170,6 +170,8 @@ GERMAN = {
     "The document could not be exported.": "Das Dokument konnte nicht exportiert werden.",
     "The document could not be saved.": "Das Dokument konnte nicht gesichert werden.",
     "Thumbnails": "Miniaturen",
+    "Table of Contents": "Inhaltsverzeichnis",
+    "No Table of Contents": "Kein Inhaltsverzeichnis",
     "Title": "Titel",
     "Tools": "Werkzeuge",
     "Underline": "Unterstreichen",

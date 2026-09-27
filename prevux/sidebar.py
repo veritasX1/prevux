@@ -4,8 +4,9 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Graphene", "1.0")
+gi.require_version("Adw", "1")
 
-from gi.repository import Gdk, Gio, GLib, GObject, Graphene, Gtk
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Graphene, Gtk
 
 from .i18n import _
 
@@ -54,6 +55,7 @@ class Sidebar(Gtk.Box):
         "page-activated": (GObject.SignalFlags.RUN_FIRST, None, (int, int)),
         "move-page": (GObject.SignalFlags.RUN_FIRST, None, (int, int, int)),
         "delete-pages": (GObject.SignalFlags.RUN_FIRST, None, ()),
+        "outline-activated": (GObject.SignalFlags.RUN_FIRST, None, (int, float)),
     }
 
     def __init__(self):
@@ -82,7 +84,25 @@ class Sidebar(Gtk.Box):
         self.scroller = Gtk.ScrolledWindow(vexpand=True)
         self.scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self.scroller.set_child(self.list)
-        self.append(self.scroller)
+
+        # Table of contents, as a second sidebar mode.
+        self.contents = Gtk.ListBox()
+        self.contents.add_css_class("navigation-sidebar")
+        self.contents.connect("row-activated", self.on_contents_activated)
+        contents_scroller = Gtk.ScrolledWindow(vexpand=True)
+        contents_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        contents_scroller.set_child(self.contents)
+        self.no_contents = Adw.StatusPage(title=_("No Table of Contents"))
+        self.no_contents.add_css_class("compact")
+
+        self.stack = Gtk.Stack(vexpand=True)
+        self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self.stack.add_named(self.scroller, "thumbnails")
+        self.stack.add_named(contents_scroller, "contents")
+        self.stack.add_named(self.no_contents, "no-contents")
+        self.append(self.stack)
+        self.mode = "thumbnails"
+        self.contents_doc = None
 
         menu = Gio.Menu()
         section = Gio.Menu()
@@ -194,6 +214,46 @@ class Sidebar(Gtk.Box):
             for row in self.list.get_selected_rows()
             if isinstance(row, PageRow)
         )
+
+    # ========================================================
+    # TABLE OF CONTENTS
+    # ========================================================
+
+    def set_mode(self, mode, doc=None):
+        self.mode = mode
+        if mode == "contents":
+            self.fill_contents(doc)
+        else:
+            self.stack.set_visible_child_name("thumbnails")
+
+    def fill_contents(self, doc):
+        self.contents.remove_all()
+        self.contents_doc = doc
+        outline = doc.outline() if doc is not None and doc.kind == "pdf" else []
+        if not outline:
+            self.stack.set_visible_child_name("no-contents")
+            return
+        for level, title, page, y in outline:
+            row = Gtk.ListBoxRow()
+            box = Gtk.Box(spacing=6)
+            box.set_margin_start(6 + (level - 1) * 14)
+            label = Gtk.Label(label=title, xalign=0, hexpand=True, ellipsize=3)
+            label.set_tooltip_text(title)
+            if level == 1:
+                label.add_css_class("heading")
+            number = Gtk.Label(label=str(page + 1))
+            number.add_css_class("dim-label")
+            number.add_css_class("numeric")
+            box.append(label)
+            box.append(number)
+            row.set_child(box)
+            row.target = (page, y)
+            self.contents.append(row)
+        self.stack.set_visible_child_name("contents")
+
+    def on_contents_activated(self, listbox, row):
+        page, y = row.target
+        self.emit("outline-activated", page, y)
 
     # ========================================================
     # EVENTS
