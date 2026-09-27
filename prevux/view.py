@@ -19,9 +19,11 @@ from .model import (
     LineAnnotation,
     MarkupAnnotation,
     NoteAnnotation,
+    ShapeAnnotation,
     TextAnnotation,
     new_shape,
 )
+from .recognize import recognize
 
 
 MARGIN = 28
@@ -61,6 +63,7 @@ class DocumentView(Gtk.Widget):
         "page-changed": (GObject.SignalFlags.RUN_FIRST, None, (int,)),
         "selection-changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
         "modified": (GObject.SignalFlags.RUN_FIRST, None, ()),
+        "notice": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
     }
 
     def __init__(self, scroller):
@@ -884,6 +887,7 @@ class DocumentView(Gtk.Widget):
         kind = action["type"]
 
         if kind == "sketch":
+            self.recognize_sketch(action["annotation"], action["page"])
             self.notify_modified()
 
         elif kind == "move" and not action["changed"]:
@@ -900,6 +904,21 @@ class DocumentView(Gtk.Widget):
                 self.rect_selection = None
                 self.queue_draw()
             self.emit("selection-changed")
+
+    def recognize_sketch(self, ink, page):
+        result = recognize(ink.strokes[-1])
+        if result is None:
+            return
+        # A separate undo step, so Ctrl+Z brings back the freehand stroke.
+        self.doc.checkpoint()
+        annotations = self.doc.annotations[page]
+        index = annotations.index(ink)
+        if result[0] == "line":
+            shape = LineAnnotation("line", result[1], result[2], ink.style)
+        else:
+            shape = ShapeAnnotation(result[0], result[1], ink.style)
+        annotations[index] = shape
+        self.emit("notice", _("Shape recognized. Undo to keep your drawing."))
 
     def widget_to_page(self, page, x, y):
         px, py, _pw, _ph = self.page_rects()[page]
