@@ -174,7 +174,10 @@ class PrevuxWindow(Adw.ApplicationWindow):
         content_view.add_top_bar(header)
 
         self.markup = MarkupToolbar(self)
-        self.markup_revealer = Gtk.Revealer(child=self.markup)
+        markup_scroller = Gtk.ScrolledWindow(child=self.markup)
+        markup_scroller.set_policy(Gtk.PolicyType.EXTERNAL, Gtk.PolicyType.NEVER)
+        markup_scroller.set_propagate_natural_height(True)
+        self.markup_revealer = Gtk.Revealer(child=markup_scroller)
         self.markup_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
         content_view.add_top_bar(self.markup_revealer)
 

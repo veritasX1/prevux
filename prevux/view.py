@@ -49,6 +49,10 @@ def rgba(red, green, blue, alpha=1.0):
     return color
 
 
+def is_highlight(annotation):
+    return isinstance(annotation, MarkupAnnotation) and annotation.kind == "highlight"
+
+
 class DocumentView(Gtk.Widget):
 
     __gsignals__ = {
@@ -413,6 +417,16 @@ class DocumentView(Gtk.Widget):
             )
 
             texture, rendered = self.doc.texture(index, scale)
+            highlights = [
+                annotation for annotation in self.doc.annotations[index]
+                if is_highlight(annotation)
+            ]
+
+            # Highlights are multiplied onto the page like a real marker, so
+            # the text underneath stays readable.
+            if highlights:
+                snapshot.push_blend(Gsk.BlendMode.MULTIPLY)
+
             if texture is None:
                 snapshot.append_color(rgba(1, 1, 1), rect)
             else:
@@ -422,6 +436,17 @@ class DocumentView(Gtk.Widget):
                     Gsk.ScalingFilter.TRILINEAR if ratio > 1.5 else Gsk.ScalingFilter.LINEAR,
                     rect,
                 )
+
+            if highlights:
+                snapshot.pop()
+                cr = snapshot.append_cairo(rect)
+                cr.translate(x, y)
+                cr.scale(self.zoom, self.zoom)
+                for annotation in highlights:
+                    cr.save()
+                    annotation.draw(cr)
+                    cr.restore()
+                snapshot.pop()
 
             if self.doc.kind == "pdf" and (
                 texture is None or abs(rendered - scale) / scale > 0.12
@@ -450,6 +475,8 @@ class DocumentView(Gtk.Widget):
 
     def draw_page_overlay(self, cr, index):
         for annotation in self.doc.annotations[index]:
+            if is_highlight(annotation):
+                continue
             cr.save()
             if annotation is self.editing and isinstance(annotation, TextAnnotation):
                 annotation.draw(cr, with_text=False)
