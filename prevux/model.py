@@ -273,7 +273,7 @@ def to_tuples(value):
 
 class ShapeAnnotation(Annotation):
 
-    KINDS = ("rect", "rounded", "oval", "star", "bubble", "polygon")
+    KINDS = ("rect", "rounded", "oval", "star", "bubble", "polygon", "spotlight")
 
     def __init__(self, kind, rect, style=None):
         super().__init__(style)
@@ -297,7 +297,7 @@ class ShapeAnnotation(Annotation):
         width = x1 - x0
         height = y1 - y0
 
-        if self.kind == "rect":
+        if self.kind in ("rect", "spotlight"):
             cr.rectangle(x0, y0, width, height)
 
         elif self.kind == "rounded":
@@ -357,6 +357,10 @@ class ShapeAnnotation(Annotation):
             cr.close_path()
 
     def draw(self, cr):
+        if self.kind == "spotlight":
+            self.draw_spotlight(cr)
+            return
+
         self.draw_shadow(cr, self.path)
 
         self.path(cr)
@@ -372,11 +376,22 @@ class ShapeAnnotation(Annotation):
         else:
             cr.new_path()
 
+    def draw_spotlight(self, cr):
+        """Dim everything except the rectangle, like Preview's highlight."""
+        x0, y0, x1, y1 = self.bounds()
+        cx0, cy0, cx1, cy1 = cr.clip_extents()
+        cr.rectangle(cx0, cy0, cx1 - cx0, cy1 - cy0)
+        rounded_rectangle(cr, x0, y0, x1 - x0, y1 - y0, min(x1 - x0, y1 - y0) * 0.08)
+        cr.set_fill_rule(cairo.FILL_RULE_EVEN_ODD)
+        cr.set_source_rgba(0, 0, 0, 0.5)
+        cr.fill()
+        cr.set_fill_rule(cairo.FILL_RULE_WINDING)
+
     def hit(self, x, y, tolerance):
         if not super().hit(x, y, tolerance):
             return False
 
-        if self.style.fill:
+        if self.style.fill or self.kind == "spotlight":
             return True
 
         # Unfilled shapes are only hit on their outline.
@@ -845,6 +860,95 @@ class MarkupAnnotation(Annotation):
 
 
 # ============================================================
+# LOUPE
+# ============================================================
+
+class LoupeAnnotation(Annotation):
+    """A round magnifier. The magnified content comes from a page source
+    (a cairo surface or the view's texture); draw() adds the frame."""
+
+    kind = "loupe"
+
+    def __init__(self, center, radius, magnification=2.0, style=None):
+        super().__init__(style)
+        self.cx, self.cy = center
+        self.radius = radius
+        self.magnification = magnification
+
+    def bounds(self):
+        r = self.radius
+        return (self.cx - r, self.cy - r, self.cx + r, self.cy + r)
+
+    def transform(self, function):
+        ax, ay = function(self.cx - self.radius, self.cy)
+        bx, by = function(self.cx + self.radius, self.cy)
+        self.cx, self.cy = function(self.cx, self.cy)
+        self.radius = max(4.0, math.hypot(bx - ax, by - ay) / 2)
+
+    def reorient(self, function):
+        self.cx, self.cy = function(self.cx, self.cy)
+
+    def magnifier_handle(self):
+        angle = -math.pi / 4
+        return (
+            self.cx + math.cos(angle) * self.radius,
+            self.cy + math.sin(angle) * self.radius,
+        )
+
+    def handles(self):
+        x0, y0, x1, y1 = self.bounds()
+        return [
+            ("nw", x0, y0), ("ne", x1, y0), ("sw", x0, y1), ("se", x1, y1),
+            ("magnify", *self.magnifier_handle()),
+        ]
+
+    def resize(self, handle, x, y, original):
+        self.cx, self.cy = original.cx, original.cy
+        self.radius = original.radius
+        self.magnification = original.magnification
+        distance = math.hypot(x - original.cx, y - original.cy)
+        if handle == "magnify":
+            factor = distance / max(1.0, original.radius)
+            self.magnification = max(1.1, min(8.0, original.magnification * factor))
+        else:
+            self.radius = max(8.0, distance / math.sqrt(2))
+
+    def hit(self, x, y, tolerance):
+        return math.hypot(x - self.cx, y - self.cy) <= self.radius + tolerance
+
+    def clip_path(self, cr):
+        cr.new_path()
+        cr.arc(self.cx, self.cy, self.radius, 0, 2 * math.pi)
+
+    def draw(self, cr, source=None, source_scale=1.0):
+        if source is not None:
+            cr.save()
+            self.clip_path(cr)
+            cr.clip()
+            cr.translate(self.cx, self.cy)
+            cr.scale(self.magnification, self.magnification)
+            cr.translate(-self.cx, -self.cy)
+            cr.scale(1 / source_scale, 1 / source_scale)
+            cr.set_source_surface(source, 0, 0)
+            cr.get_source().set_filter(cairo.FILTER_GOOD)
+            cr.paint()
+            cr.restore()
+
+        # Soft shadow and frame.
+        cr.save()
+        cr.arc(self.cx, self.cy + self.radius * 0.03, self.radius, 0, 2 * math.pi)
+        cr.set_source_rgba(0, 0, 0, 0.25)
+        cr.set_line_width(self.style.width * 1.8)
+        cr.stroke()
+        cr.restore()
+
+        self.clip_path(cr)
+        set_color(cr, self.style.stroke or (0.55, 0.55, 0.6, 1.0))
+        cr.set_line_width(self.style.width)
+        cr.stroke()
+
+
+# ============================================================
 # SIGNATURE
 # ============================================================
 
@@ -858,6 +962,7 @@ ANNOTATION_TYPES = {
     **{kind: LineAnnotation for kind in LineAnnotation.KINDS},
     **{kind: MarkupAnnotation for kind in MarkupAnnotation.KINDS},
     "ink": InkAnnotation,
+    "loupe": LoupeAnnotation,
     "signature": SignatureAnnotation,
     "text": TextAnnotation,
     "note": NoteAnnotation,
@@ -869,6 +974,9 @@ def new_shape(kind, center, size, style):
     cx, cy = center
     half = size / 2
 
+    if kind == "loupe":
+        return LoupeAnnotation((cx, cy), size * 0.45, 2.0, style)
+
     if kind in LineAnnotation.KINDS:
         return LineAnnotation(
             kind, (cx - half, cy + half * 0.4), (cx + half, cy - half * 0.4),
@@ -876,7 +984,7 @@ def new_shape(kind, center, size, style):
         )
 
     height = size * (0.75 if kind == "bubble" else 1.0)
-    width = size * (1.4 if kind in ("rect", "rounded", "oval", "bubble") else 1.0)
+    width = size * (1.4 if kind in ("rect", "rounded", "oval", "bubble", "spotlight") else 1.0)
     return ShapeAnnotation(
         kind,
         (cx - width / 2, cy - height / 2, cx + width / 2, cy + height / 2),

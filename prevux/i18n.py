@@ -155,6 +155,8 @@ GERMAN = {
     "Size": "Größe",
     "Sketch": "Skizzieren",
     "Speech Bubble": "Sprechblase",
+    "Spotlight": "Hervorheben",
+    "Loupe": "Lupe",
     "Star": "Stern",
     "Strike Through": "Durchstreichen",
     "Temperature": "Farbtemperatur",

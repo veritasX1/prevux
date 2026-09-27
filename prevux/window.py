@@ -916,7 +916,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
         cr.set_source_surface(surface, 0, 0)
         cr.paint()
         cr.restore()
-        doc.render_annotations(cr, page)
+        doc.render_annotations(cr, page, surface, dpi_scale)
 
     # ========================================================
     # CLOSING
