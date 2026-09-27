@@ -716,7 +716,10 @@ def load_signatures():
 
 
 def save_signatures(signatures):
-    SIGNATURE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    # Signatures are personal: readable by the owner only.
+    SIGNATURE_FILE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    SIGNATURE_FILE.touch(mode=0o600, exist_ok=True)
+    SIGNATURE_FILE.chmod(0o600)
     SIGNATURE_FILE.write_text(json.dumps(signatures))
 
 

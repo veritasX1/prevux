@@ -83,7 +83,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
     def build_ui(self):
         self.split = Adw.OverlaySplitView()
         self.split.set_min_sidebar_width(150)
-        self.split.set_max_sidebar_width(190)
+        self.split.set_max_sidebar_width(240)
         self.split.set_show_sidebar(False)
 
         # --- sidebar ------------------------------------------
