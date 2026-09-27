@@ -671,9 +671,21 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.sidebar.set_documents(self.documents)
         self.show_document(len(self.documents) - len(documents))
         if len(self.documents) > 1 or documents[0].page_count > 1:
-            self.split.set_show_sidebar(True)
+            self.show_sidebar_when_ready()
         for doc in documents:
             self.get_application().note_recent(doc.path)
+
+    def show_sidebar_when_ready(self):
+        # Revealing the sidebar before the window has its first size makes
+        # the split view allocate nonsense sizes; wait for the first frame.
+        if self.get_mapped() and self.content_bin.get_width() > 0:
+            self.split.set_show_sidebar(True)
+            return
+        GLib.timeout_add(50, self._show_sidebar_retry)
+
+    def _show_sidebar_retry(self):
+        self.show_sidebar_when_ready()
+        return False
 
     def show_document(self, index):
         if not 0 <= index < len(self.documents):
