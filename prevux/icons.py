@@ -410,6 +410,14 @@ def shape_polygon(cr):
     _stroke(cr, 1.5)
 
 
+def shape_spotlight(cr):
+    cr.rectangle(0.5, 1.5, 15, 13)
+    rounded_rectangle(cr, 4, 5, 8, 6, 1.2)
+    cr.set_fill_rule(1)
+    cr.fill()
+    cr.set_fill_rule(0)
+
+
 def shape_loupe(cr):
     cr.arc(7, 7, 5.3, 0, 2 * math.pi)
     _stroke(cr, 1.5)

@@ -1,5 +1,6 @@
 """Documents: images and PDFs, with editable annotations and undo."""
 
+import io
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,7 @@ import pymupdf
 
 from .model import (
     Annotation,
+    LoupeAnnotation,
     InkAnnotation,
     LineAnnotation,
     MarkupAnnotation,
@@ -206,10 +208,15 @@ class BaseDocument:
         for annotation in self.annotations[index]:
             annotation.reorient(function)
 
-    def render_annotations(self, cr, index):
+    def render_annotations(self, cr, index, source=None, source_scale=1.0):
+        """Draw the markup of a page. `source` is an unmarked rendering of
+        the page (cairo surface at `source_scale`) for loupes."""
         for annotation in self.annotations[index]:
             cr.save()
-            annotation.draw(cr)
+            if isinstance(annotation, LoupeAnnotation):
+                annotation.draw(cr, source, source_scale)
+            else:
+                annotation.draw(cr)
             cr.restore()
 
     def info(self):
@@ -321,8 +328,9 @@ class ImageDocument(BaseDocument):
         if not self.annotations[0]:
             return self.image.copy()
         surface, _data = pil_to_surface(self.image)
+        source, _source_data = pil_to_surface(self.image)
         cr = cairo.Context(surface)
-        self.render_annotations(cr, 0)
+        self.render_annotations(cr, 0, source)
         return surface_to_pil(surface)
 
     def save(self, path=None, format_name=None):
@@ -417,9 +425,10 @@ class PDFDocument(BaseDocument):
         image = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
         if self.annotations[index]:
             surface, _data = pil_to_surface(image)
+            source, _source_data = pil_to_surface(image)
             cr = cairo.Context(surface)
             cr.scale(scale, scale)
-            self.render_annotations(cr, index)
+            self.render_annotations(cr, index, source, scale)
             image = surface_to_pil(surface)
         return pil_to_texture(image)
 
@@ -664,6 +673,11 @@ def export_annotation(page, annotation, matrix):
         result.normalize()
         return result
 
+    if isinstance(annotation, LoupeAnnotation) or (
+        isinstance(annotation, ShapeAnnotation) and annotation.kind == "spotlight"
+    ):
+        return export_stamp(page, annotation, matrix)
+
     if isinstance(annotation, TextAnnotation):
         if not annotation.text.strip():
             return None
@@ -737,6 +751,58 @@ def export_annotation(page, annotation, matrix):
         return annot
 
     return None
+
+
+def export_stamp(page, annotation, matrix):
+    """Loupe and spotlight have no PDF equivalent: store their look as an
+    image stamp (shown by every viewer) that Prevux can edit again."""
+    width, height = page.rect.width, page.rect.height
+    if isinstance(annotation, LoupeAnnotation):
+        x0, y0, x1, y1 = annotation.bounds()
+        pad = annotation.style.width * 2
+        area = (x0 - pad, y0 - pad, x1 + pad, y1 + pad)
+    else:
+        area = (0, 0, width, height)
+
+    scale = min(3.0, 3000 / max(area[2] - area[0], area[3] - area[1]))
+    pixel_width = max(1, int((area[2] - area[0]) * scale))
+    pixel_height = max(1, int((area[3] - area[1]) * scale))
+    surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, pixel_width, pixel_height)
+    cr = cairo.Context(surface)
+    cr.scale(scale, scale)
+    cr.translate(-area[0], -area[1])
+    cr.rectangle(*area[:2], area[2] - area[0], area[3] - area[1])
+    cr.clip()
+
+    if isinstance(annotation, LoupeAnnotation):
+        # Render the page (without other markup) as the magnified source.
+        source_scale = scale * annotation.magnification
+        pixmap = page.get_pixmap(
+            matrix=pymupdf.Matrix(source_scale, source_scale), alpha=False, annots=False,
+        )
+        image = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
+        source, _data = pil_to_surface(image)
+        annotation.draw(cr, source, source_scale)
+    else:
+        annotation.draw(cr)
+
+    png = surface_to_pil(surface)
+    if page.rotation:
+        # The stamp lives in unrotated page space.
+        png = png.rotate(page.rotation, expand=True)
+    buffer = io.BytesIO()
+    png.save(buffer, "PNG")
+
+    rect = pymupdf.Rect(*area) * matrix
+    rect.normalize()
+    # PyMuPDF adjusts image stamps to the page rotation on its own, and not
+    # predictably; place the stamp on the unrotated page instead.
+    rotation = page.rotation
+    page.set_rotation(0)
+    try:
+        return page.add_stamp_annot(rect, stamp=buffer.getvalue())
+    finally:
+        page.set_rotation(rotation)
 
 
 def flatten_path(annotation):

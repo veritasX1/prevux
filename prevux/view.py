@@ -15,6 +15,7 @@ from gi.repository import Gdk, GLib, GObject, Graphene, Gsk, Gtk, Pango
 from .i18n import _
 from .model import (
     InkAnnotation,
+    LoupeAnnotation,
     LineAnnotation,
     MarkupAnnotation,
     NoteAnnotation,
@@ -39,7 +40,7 @@ RESIZE_CURSORS = {
     "ne": "nesw-resize", "sw": "nesw-resize",
     "n": "ns-resize", "s": "ns-resize",
     "w": "ew-resize", "e": "ew-resize",
-    "start": "crosshair", "end": "crosshair",
+    "start": "crosshair", "end": "crosshair", "magnify": "pointer",
 }
 
 
@@ -448,6 +449,9 @@ class DocumentView(Gtk.Widget):
                     cr.restore()
                 snapshot.pop()
 
+            if texture is not None:
+                self.snapshot_loupes(snapshot, index, texture, x, y, w, h)
+
             if self.doc.kind == "pdf" and (
                 texture is None or abs(rendered - scale) / scale > 0.12
             ):
@@ -468,6 +472,31 @@ class DocumentView(Gtk.Widget):
 
         if self.editor is not None:
             self.snapshot_child(self.editor, snapshot)
+
+    def snapshot_loupes(self, snapshot, index, texture, x, y, w, h):
+        """Magnify the page texture inside each loupe."""
+        for annotation in self.doc.annotations[index]:
+            if not isinstance(annotation, LoupeAnnotation):
+                continue
+            cx = x + annotation.cx * self.zoom
+            cy = y + annotation.cy * self.zoom
+            radius = annotation.radius * self.zoom
+            factor = annotation.magnification
+            circle = Gsk.RoundedRect()
+            circle.init_from_rect(
+                Graphene.Rect().init(cx - radius, cy - radius, radius * 2, radius * 2),
+                radius,
+            )
+            snapshot.push_rounded_clip(circle)
+            snapshot.append_color(rgba(1, 1, 1), Graphene.Rect().init(cx - radius, cy - radius, radius * 2, radius * 2))
+            snapshot.append_scaled_texture(
+                texture,
+                Gsk.ScalingFilter.LINEAR,
+                Graphene.Rect().init(
+                    cx + (x - cx) * factor, cy + (y - cy) * factor, w * factor, h * factor,
+                ),
+            )
+            snapshot.pop()
 
     def is_dark(self):
         color = self.get_color()

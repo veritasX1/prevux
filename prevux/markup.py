@@ -20,6 +20,7 @@ from .model import (
     RED,
     InkAnnotation,
     LineAnnotation,
+    LoupeAnnotation,
     ShapeAnnotation,
     SignatureAnnotation,
     Style,
@@ -36,6 +37,8 @@ SHAPES = [
     ("bubble", "Speech Bubble"),
     ("star", "Star"),
     ("polygon", "Polygon"),
+    ("spotlight", "Spotlight"),
+    ("loupe", "Loupe"),
 ]
 
 LINE_WIDTHS = [0.5, 1, 2, 3, 5, 8, 12]
@@ -248,7 +251,7 @@ class MarkupToolbar(Gtk.Box):
             button.add_css_class("flat")
             button.set_size_request(40, 36)
             button.connect("clicked", self.on_shape, kind, popover)
-            grid.attach(button, index % 4, index // 4, 1, 1)
+            grid.attach(button, index % 5, index // 5, 1, 1)
         popover.set_child(grid)
         return popover
 
@@ -316,7 +319,7 @@ class MarkupToolbar(Gtk.Box):
         return None
 
     def styled_types(self):
-        return (ShapeAnnotation, LineAnnotation, InkAnnotation, TextAnnotation)
+        return (ShapeAnnotation, LineAnnotation, InkAnnotation, TextAnnotation, LoupeAnnotation)
 
     def on_width(self, button, width):
         if self.updating or not button.get_active():
