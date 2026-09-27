@@ -18,6 +18,7 @@ import pymupdf
 from .model import (
     Annotation,
     LoupeAnnotation,
+    RedactAnnotation,
     InkAnnotation,
     LineAnnotation,
     MarkupAnnotation,
@@ -585,8 +586,32 @@ class PDFDocument(BaseDocument):
                     page.delete_annot(annot)
                     break
 
+    def apply_redactions(self):
+        """Remove everything under redaction boxes for good."""
+        applied = False
+        for index, page in enumerate(self.doc):
+            redactions = [
+                annotation for annotation in self.annotations[index]
+                if isinstance(annotation, RedactAnnotation)
+            ]
+            if not redactions:
+                continue
+            matrix = page.derotation_matrix
+            for annotation in redactions:
+                for rect in annotation.rects:
+                    area = pymupdf.Rect(*rect) * matrix
+                    area.normalize()
+                    page.add_redact_annot(area, fill=(0, 0, 0))
+                self.annotations[index].remove(annotation)
+            page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_PIXELS)
+            applied = True
+        if applied:
+            self.changed()
+        return applied
+
     def save(self, path=None, format_name=None, flatten=False):
         path = str(path or self.path)
+        self.apply_redactions()
         added = self.export_annotations()
         try:
             if format_name and format_name != "PDF":
@@ -610,6 +635,7 @@ class PDFDocument(BaseDocument):
             self.modified = False
 
     def save_page_image(self, path, format_name, index=0, dpi=150):
+        self.apply_redactions()
         pixmap = self.doc[index].get_pixmap(dpi=dpi, annots=True)
         image = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
         image.save(path, format_name)
