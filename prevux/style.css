@@ -155,3 +155,18 @@ menubutton.narrow-arrow > button {
   padding-left: 2px;
   padding-right: 2px;
 }
+
+/* Form fields being filled in */
+.form-editor,
+.form-editor text {
+  background-color: white;
+  color: black;
+  min-height: 0;
+  padding: 0 3px;
+}
+
+.form-editor {
+  outline: 2px solid alpha(@accent_color, 0.7);
+  outline-offset: 0;
+  border-radius: 2px;
+}

@@ -89,6 +89,9 @@ class DocumentView(Gtk.Widget):
         self.search_current = -1
 
         self.editor = None
+        self.field_editor = None
+        self.field_editing = None
+        self.choice_popover = None
         self.retired_editors = []
         self.editing = None
         self.editing_page = 0
@@ -239,6 +242,12 @@ class DocumentView(Gtk.Widget):
 
         if self.editor is not None:
             self.allocate_editor()
+
+        if self.field_editor is not None:
+            self.allocate_field_editor()
+
+        if self.choice_popover is not None:
+            self.choice_popover.present()
 
     # ========================================================
     # COORDINATES
@@ -477,6 +486,9 @@ class DocumentView(Gtk.Widget):
         if self.editor is not None:
             self.snapshot_child(self.editor, snapshot)
 
+        if self.field_editor is not None:
+            self.snapshot_child(self.field_editor, snapshot)
+
     def snapshot_loupes(self, snapshot, index, texture, x, y, w, h):
         """Magnify the page texture inside each loupe."""
         for annotation in self.doc.annotations[index]:
@@ -507,6 +519,17 @@ class DocumentView(Gtk.Widget):
         return color.red + color.green + color.blue > 1.5
 
     def draw_page_overlay(self, cr, index):
+        if self.doc.kind == "pdf" and self.doc.has_forms:
+            # Fillable fields are tinted, as in Preview.
+            accent = self.accent()
+            for field in self.doc.form_fields(index):
+                if field["readonly"]:
+                    continue
+                x0, y0, x1, y1 = field["rect"]
+                cr.set_source_rgba(accent.red, accent.green, accent.blue, 0.12)
+                cr.rectangle(x0, y0, x1 - x0, y1 - y0)
+                cr.fill()
+
         for annotation in self.doc.annotations[index]:
             if is_highlight(annotation):
                 continue
@@ -768,6 +791,8 @@ class DocumentView(Gtk.Widget):
 
         if self.editor is not None:
             self.finish_editing()
+        if self.field_editor is not None:
+            self.finish_field_edit()
 
         handle = self.hit_handle(x, y)
         if handle:
@@ -802,6 +827,13 @@ class DocumentView(Gtk.Widget):
             self.set_tool("select_default")
             self.start_editing(note, page, checkpoint=False)
             return
+
+        if self.tool in ("text-select", "rect-select"):
+            field = self.hit_field(page, px, py)
+            if field is not None:
+                self.select(None)
+                self.activate_field(page, field)
+                return
 
         annotation = self.hit_annotation(page, px, py)
         if annotation is not None:
@@ -964,6 +996,9 @@ class DocumentView(Gtk.Widget):
                     name = "crosshair"
                 elif self.tool == "note":
                     name = "copy"
+                elif self.hit_field(page, px, py) is not None:
+                    field = self.hit_field(page, px, py)
+                    name = "text" if field["kind"] == "text" else "pointer"
                 elif self.hit_annotation(page, px, py) is not None:
                     name = "move"
                 elif self.tool == "redact":
@@ -1099,6 +1134,189 @@ class DocumentView(Gtk.Widget):
             self.update_editor_style()
         self.notify_modified()
         return True
+
+    # ========================================================
+    # FORMS (PDF)
+    # ========================================================
+
+    def hit_field(self, page, x, y):
+        if self.doc.kind != "pdf" or not self.doc.has_forms:
+            return None
+        for field in self.doc.form_fields(page):
+            x0, y0, x1, y1 = field["rect"]
+            if x0 <= x <= x1 and y0 <= y <= y1 and not field["readonly"]:
+                return field
+        return None
+
+    def activate_field(self, page, field):
+        kind = field["kind"]
+        if kind == "checkbox":
+            self.set_field(page, field, not field["checked"])
+        elif kind == "radio":
+            if not field["checked"]:
+                self.set_field(page, field, True)
+        elif kind == "choice":
+            self.open_choices(page, field)
+        else:
+            self.start_field_edit(page, field)
+
+    def set_field(self, page, field, value):
+        self.doc.checkpoint(structure=True)
+        self.doc.set_field(page, field["xref"], value)
+        self.notify_modified()
+
+    def open_choices(self, page, field):
+        self.close_choices()
+        popover = Gtk.Popover()
+        popover.set_has_arrow(False)
+        listbox = Gtk.ListBox()
+        listbox.add_css_class("navigation-sidebar")
+        for choice in field["choices"]:
+            label = Gtk.Label(label=choice, xalign=0)
+            listbox.append(label)
+            if choice == field["value"]:
+                listbox.select_row(label.get_parent())
+        listbox.connect(
+            "row-activated",
+            lambda _box, row: self.choose(page, field, field["choices"][row.get_index()]),
+        )
+        popover.set_child(listbox)
+        popover.set_parent(self)
+        x0, y0, x1, y1 = field["rect"]
+        ax, ay = self.to_widget(page, x0, y0)
+        bx, by = self.to_widget(page, x1, y1)
+        rect = Gdk.Rectangle()
+        rect.x, rect.y, rect.width, rect.height = int(ax), int(ay), int(bx - ax), int(by - ay)
+        popover.set_pointing_to(rect)
+        popover.set_position(Gtk.PositionType.BOTTOM)
+        popover.connect("closed", lambda _popover: GLib.idle_add(self.close_choices))
+        self.choice_popover = popover
+        popover.popup()
+
+    def choose(self, page, field, value):
+        self.close_choices()
+        if value != field["value"]:
+            self.set_field(page, field, value)
+
+    def close_choices(self):
+        popover = self.choice_popover
+        if popover is not None:
+            self.choice_popover = None
+            popover.popdown()
+            popover.unparent()
+        return False
+
+    def start_field_edit(self, page, field):
+        self.finish_field_edit()
+        self.field_editing = (page, field)
+
+        if field["multiline"]:
+            editor = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR)
+            editor.get_buffer().set_text(field["value"] or "")
+        else:
+            editor = Gtk.Entry(has_frame=False)
+            editor.set_text(field["value"] or "")
+            if field["max_length"]:
+                editor.set_max_length(field["max_length"])
+            editor.connect("activate", lambda _entry: self.next_field(1))
+        editor.add_css_class("form-editor")
+
+        x0, y0, x1, y1 = field["rect"]
+        size = field["font_size"] or min(12.0, (y1 - y0) * 0.65)
+        provider = Gtk.CssProvider()
+        provider.load_from_string(
+            f".form-editor, .form-editor text {{ font-size: {max(6.0, size * self.zoom):.1f}px; }}"
+        )
+        editor.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+        keys = Gtk.EventControllerKey()
+        keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        keys.connect("key-pressed", self.on_field_key)
+        editor.add_controller(keys)
+        focus = Gtk.EventControllerFocus()
+        focus.connect("leave", lambda *_args: GLib.idle_add(self.finish_field_if_unfocused))
+        editor.add_controller(focus)
+
+        self.field_editor = editor
+        editor.set_parent(self)
+        editor.grab_focus()
+        self.queue_resize()
+
+    def field_editor_text(self):
+        editor = self.field_editor
+        if isinstance(editor, Gtk.TextView):
+            buffer = editor.get_buffer()
+            return buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
+        return editor.get_text()
+
+    def on_field_key(self, controller, keyval, keycode, state):
+        if keyval == Gdk.KEY_Escape:
+            self.finish_field_edit(commit=False)
+            self.grab_focus()
+            return True
+        if keyval in (Gdk.KEY_Tab, Gdk.KEY_ISO_Left_Tab):
+            backwards = keyval == Gdk.KEY_ISO_Left_Tab or state & Gdk.ModifierType.SHIFT_MASK
+            self.next_field(-1 if backwards else 1)
+            return True
+        return False
+
+    def next_field(self, direction):
+        """Commit and move to the next text field, like Tab in Preview."""
+        if self.field_editing is None:
+            return
+        page, field = self.field_editing
+        self.finish_field_edit()
+        order = [
+            (index, item)
+            for index in range(self.doc.page_count)
+            for item in self.doc.form_fields(index)
+            if item["kind"] == "text" and not item["readonly"]
+        ]
+        keys = [(index, item["xref"]) for index, item in order]
+        if not order or (page, field["xref"]) not in keys:
+            return
+        position = (keys.index((page, field["xref"])) + direction) % len(order)
+        next_page, next_field = order[position]
+        if next_page != self.current_page:
+            self.scroll_to_page(next_page, next_field["rect"][1])
+        self.start_field_edit(next_page, next_field)
+
+    def finish_field_if_unfocused(self):
+        editor = self.field_editor
+        if editor is not None and not editor.has_focus() and editor.get_focus_child() is None:
+            self.finish_field_edit()
+        return False
+
+    def finish_field_edit(self, commit=True):
+        editor = self.field_editor
+        if editor is None:
+            return
+        page, field = self.field_editing
+        text = self.field_editor_text()
+        self.field_editor = None
+        self.field_editing = None
+        if editor.has_focus() or editor.get_focus_child() is not None:
+            self.grab_focus()
+        editor.set_visible(False)
+        self.retired_editors.append(editor)
+        GLib.timeout_add(500, self.release_editors)
+        if commit and text != (field["value"] or ""):
+            self.set_field(page, field, text)
+        self.queue_draw()
+
+    def allocate_field_editor(self):
+        page, field = self.field_editing
+        if page >= len(self.page_rects()):
+            return
+        x0, y0, x1, y1 = field["rect"]
+        ax, ay = self.to_widget(page, x0, y0)
+        bx, by = self.to_widget(page, x1, y1)
+        width = max(20, int(bx - ax))
+        _minimum, natural, _mb, _nb = self.field_editor.measure(Gtk.Orientation.VERTICAL, width)
+        height = max(int(by - ay), natural if not field["multiline"] else 0)
+        top = ay + (by - ay - height) / 2 if not field["multiline"] else ay
+        transform = Gsk.Transform().translate(Graphene.Point().init(ax, top))
+        self.field_editor.allocate(width, int(height), -1, transform)
 
     # ========================================================
     # TEXT SELECTION (PDF)

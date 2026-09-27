@@ -16,11 +16,14 @@ Built with GTK 4 and libadwaita, PyMuPDF and Pillow.
   bubble, star, polygon, spotlight, loupe), text boxes, notes, signatures,
   shape style, border and fill color, text style
 - **Redact** text and areas in PDFs; the content is removed for good on save
+- **Fill in PDF forms**: text fields (Tab moves to the next one), check boxes,
+  radio buttons and choice lists
 - **Highlight, underline and strike through** text in PDFs
 - Markup stays **editable**: in PDFs it is saved as standard PDF annotations
   that other viewers show as well, and Prevux can edit them again later
 - **Pages**: rotate, reorder by drag and drop, insert blank pages, delete;
-  thumbnails or table of contents in the sidebar
+  drag thumbnails onto another PDF (also in another window) to copy pages;
+  thumbnails, table of contents or search results in the sidebar
 - **Images**: crop, rotate, flip, adjust size, adjust color
 - Undo/redo for everything, search in PDFs, print, export to other formats
 - Light and dark mode, window controls on the leading edge like on the Mac
