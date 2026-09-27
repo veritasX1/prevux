@@ -1,4 +1,4 @@
-from prevux.application import PrevuxApplication
+from prevux.application import main
 
 if __name__ == "__main__":
-    raise SystemExit(PrevuxApplication().run())
+    raise SystemExit(main())

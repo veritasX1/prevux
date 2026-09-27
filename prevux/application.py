@@ -1,23 +1,129 @@
+import sys
+from pathlib import Path
+
 import gi
 
 gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
 
-from gi.repository import Gtk
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
+from .i18n import _
 from .window import PrevuxWindow
 
 
-class PrevuxApplication(Gtk.Application):
+# Shortcuts follow Preview, with Cmd mapped to Ctrl and Option to Alt.
+# Editing keys (Ctrl+C/X/V/Z/A, Delete) are handled by the window so that
+# text fields keep working.
+ACCELERATORS = {
+    "app.new-window": ["<Control><Alt>n"],
+    "app.quit": ["<Control>q"],
+    "app.shortcuts": ["<Control>question"],
+    "win.new-from-clipboard": ["<Control>n"],
+    "win.open": ["<Control>o"],
+    "win.close": ["<Control>w"],
+    "win.save": ["<Control>s"],
+    "win.export": ["<Control><Shift>s"],
+    "win.print": ["<Control>p"],
+    "win.find": ["<Control>f"],
+    "win.hide-sidebar": ["<Control><Alt>1"],
+    "win.show-sidebar": ["<Control><Alt>2"],
+    "win.actual-size": ["<Control>0"],
+    "win.zoom-fit": ["<Control>9"],
+    "win.zoom-in": ["<Control>plus", "<Control>equal", "<Control>KP_Add"],
+    "win.zoom-out": ["<Control>minus", "<Control>KP_Subtract"],
+    "win.markup": ["<Control><Shift>a"],
+    "win.fullscreen": ["F11", "<Control><Shift>f"],
+    "win.previous-page": ["<Alt>Up"],
+    "win.next-page": ["<Alt>Down"],
+    "win.go-to-page": ["<Control><Alt>g"],
+    "win.previous-document": ["<Alt>Page_Up"],
+    "win.next-document": ["<Alt>Page_Down"],
+    "win.inspector": ["<Control>i"],
+    "win.rotate-left": ["<Control>l"],
+    "win.rotate-right": ["<Control>r"],
+    "win.highlight": ["<Control><Shift>h"],
+    "win.crop": ["<Control>k"],
+    "win.adjust-color": ["<Control><Alt>c"],
+}
+
+
+class PrevuxApplication(Adw.Application):
 
     def __init__(self):
         super().__init__(
-            application_id="com.prevux.Prevux"
+            application_id="io.github.veritasx1.Prevux",
+            flags=Gio.ApplicationFlags.HANDLES_OPEN | Gio.ApplicationFlags.NON_UNIQUE,
+        )
+        self.clipboard_annotation = None
+        self.clipboard_marker = None
+
+    def do_startup(self):
+        Adw.Application.do_startup(self)
+        GLib.set_application_name("Prevux")
+
+        css = Gtk.CssProvider()
+        css.load_from_path(str(Path(__file__).with_name("style.css")))
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
         )
 
+        for name, callback in (
+            ("new-window", lambda: self.new_window().present()),
+            ("quit", self.quit_all),
+            ("about", self.show_about),
+            ("shortcuts", self.show_shortcuts),
+        ):
+            action = Gio.SimpleAction.new(name, None)
+            action.connect("activate", lambda _action, _param, function=callback: function())
+            self.add_action(action)
+
+        for action, accels in ACCELERATORS.items():
+            self.set_accels_for_action(action, accels)
+
     def do_activate(self):
-        window = self.props.active_window
-
-        if window is None:
-            window = PrevuxWindow(self)
-
+        window = self.get_active_window() or self.new_window()
         window.present()
+
+    def do_open(self, files, n_files, hint):
+        paths = [file.get_path() for file in files if file.get_path()]
+        self.open_paths(paths)
+
+    def new_window(self):
+        return PrevuxWindow(self)
+
+    def open_paths(self, paths, window=None):
+        window = window or self.new_window()
+        window.present()
+        window.load_paths(paths)
+        return window
+
+    def note_recent(self, path):
+        try:
+            Gtk.RecentManager.get_default().add_item(Gio.File.new_for_path(path).get_uri())
+        except Exception:
+            pass
+
+    def quit_all(self):
+        for window in list(self.get_windows()):
+            window.close()
+
+    def show_about(self):
+        about = Adw.AboutDialog(
+            application_name="Prevux",
+            application_icon="image-viewer",
+            developer_name="Olaf Winkler",
+            version="0.2",
+            website="https://github.com/veritasX1/prevux",
+            comments=_("A lightweight image and PDF viewer for Linux, inspired by macOS Preview."),
+            license_type=Gtk.License.UNKNOWN,
+        )
+        about.present(self.get_active_window())
+
+    def show_shortcuts(self):
+        from .shortcuts import show_shortcuts
+        show_shortcuts(self.get_active_window())
+
+
+def main():
+    return PrevuxApplication().run(sys.argv)
