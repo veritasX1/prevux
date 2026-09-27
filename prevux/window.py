@@ -244,6 +244,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.view.connect("page-changed", self.on_view_page_changed)
         self.view.connect("selection-changed", self.on_view_selection_changed)
         self.view.connect("modified", self.on_view_modified)
+        self.view.connect("notice", lambda _view, text: self.toast(text))
         self.view.connect("zoom-changed", lambda *_args: self.update_state())
         self.markup.update_color_icons()
 

@@ -141,6 +141,8 @@ GERMAN = {
     "Select an area with Rectangular Selection first.":
         "Wähle zuerst mit der rechteckigen Auswahl einen Bereich aus.",
     "Shadow": "Schatten",
+    "Shape recognized. Undo to keep your drawing.":
+        "Form erkannt. Widerrufen behält deine Zeichnung.",
     "Shape Style": "Formstil",
     "Shapes": "Formen",
     "Share": "Teilen",
