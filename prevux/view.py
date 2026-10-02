@@ -100,6 +100,8 @@ class DocumentView(Gtk.Widget):
         self.action = None
         self.pending_anchor = None
         self.scroll_top_pending = False
+        # Like Preview's View menu: continuous scroll, single page or two pages side by side.
+        self.display_mode = "continuous"
         self.last_viewport = (0, 0)
         self.layout_cache = None
         self.render_queue = []
@@ -178,16 +180,30 @@ class DocumentView(Gtk.Widget):
     # LAYOUT
     # ========================================================
 
+    def layout_rows(self):
+        """Pages per row: all of them one below the other, the current one alone, or pairs."""
+        count = self.doc.page_count if self.doc is not None else 0
+        if count == 0:
+            return []
+        if self.display_mode == "single":
+            return [[min(self.current_page, count - 1)]]
+        if self.display_mode == "two":
+            return [list(range(i, min(i + 2, count))) for i in range(0, count, 2)]
+        return [[i] for i in range(count)]
+
+    def row_size(self, row):
+        sizes = [self.doc.page_size(index) for index in row]
+        width = sum(w for w, _h in sizes) * self.zoom + GAP * (len(row) - 1)
+        height = max(h for _w, h in sizes) * self.zoom
+        return width, height
+
     def content_size(self):
-        if self.doc is None or self.doc.page_count == 0:
+        rows = self.layout_rows()
+        if not rows:
             return 1, 1
-        sizes = [self.doc.page_size(index) for index in range(self.doc.page_count)]
-        width = max(size[0] for size in sizes) * self.zoom + 2 * MARGIN
-        height = (
-            sum(size[1] for size in sizes) * self.zoom
-            + GAP * (len(sizes) - 1)
-            + 2 * MARGIN
-        )
+        sizes = [self.row_size(row) for row in rows]
+        width = max(w for w, _h in sizes) + 2 * MARGIN
+        height = sum(h for _w, h in sizes) + GAP * (len(sizes) - 1) + 2 * MARGIN
         return int(math.ceil(width)), int(math.ceil(height))
 
     def do_measure(self, orientation, for_size):
@@ -198,28 +214,83 @@ class DocumentView(Gtk.Widget):
     def page_rects(self):
         if self.doc is None:
             return []
-        key = (self.get_width(), self.get_height(), self.zoom, self.doc.page_count, self.doc.version)
+        key = (self.get_width(), self.get_height(), self.zoom, self.doc.page_count, self.doc.version,
+               self.display_mode, self.current_page if self.display_mode == "single" else None)
         if self.layout_cache and self.layout_cache[0] == key:
             return self.layout_cache[1]
 
         width = self.get_width()
-        rects = []
+        # Pages not shown (single page mode) get an empty rectangle far away.
+        rects = [(-1e6, -1e6, 0.0, 0.0)] * self.doc.page_count
         y = MARGIN
-        for index in range(self.doc.page_count):
-            page_width, page_height = self.doc.page_size(index)
-            w = page_width * self.zoom
-            h = page_height * self.zoom
-            x = max(MARGIN, (width - w) / 2)
-            rects.append((x, y, w, h))
-            y += h + GAP
+        for row in self.layout_rows():
+            row_width, row_height = self.row_size(row)
+            x = max(MARGIN, (width - row_width) / 2)
+            for index in row:
+                page_width, page_height = self.doc.page_size(index)
+                w, h = page_width * self.zoom, page_height * self.zoom
+                rects[index] = (x, y + (row_height - h) / 2, w, h)
+                x += w + GAP
+            y += row_height + GAP
 
         total = y - GAP + MARGIN
         if total < self.get_height():
             offset = (self.get_height() - total) / 2
-            rects = [(x, y + offset, w, h) for x, y, w, h in rects]
+            rects = [(x, y + offset, w, h) if w else (x, y, w, h) for x, y, w, h in rects]
 
         self.layout_cache = (key, rects)
         return rects
+
+    def on_flip_scroll(self, controller, dx, dy):
+        if self.display_mode != "single" or self.doc is None or dy == 0:
+            return False
+        state = controller.get_current_event_state()
+        if state & Gdk.ModifierType.CONTROL_MASK:
+            return False   # Ctrl+scroll zooms
+        adjustment = self.scroller.get_vadjustment()
+        at_top = adjustment.get_value() <= adjustment.get_lower() + 0.5
+        at_bottom = adjustment.get_value() + adjustment.get_page_size() >= adjustment.get_upper() - 0.5
+        if dy > 0 and at_bottom and self.current_page + 1 < self.doc.page_count:
+            self.scroll_to_page(self.current_page + 1)
+            return True
+        if dy < 0 and at_top and self.current_page > 0:
+            page = self.current_page - 1
+            self.scroll_to_page(page)
+            GLib.timeout_add(60, lambda: adjustment.set_value(adjustment.get_upper()) and False)
+            return True
+        return False
+
+    def zoom_to_selection(self):
+        """Like Preview's View → Zoom to Selection: the rectangular selection fills the window."""
+        if self.rect_selection is None:
+            return False
+        page, x0, y0, x1, y1 = self.rect_selection
+        width, height = abs(x1 - x0), abs(y1 - y0)
+        if width < 1 or height < 1:
+            return False
+        viewport_width, viewport_height = self.viewport_size()
+        zoom = min((viewport_width - 2 * MARGIN) / width, (viewport_height - 2 * MARGIN) / height)
+        self.fit_mode = None
+        self.set_zoom(zoom)
+
+        def center():
+            wx, wy = self.to_widget(page, (x0 + x1) / 2, (y0 + y1) / 2)
+            self._scroll_to(wx - viewport_width / 2, wy - viewport_height / 2)
+            return False
+        GLib.timeout_add(80, center)
+        return True
+
+    def set_display_mode(self, mode):
+        if mode == self.display_mode or self.doc is None:
+            self.display_mode = mode
+            return
+        page = self.current_page
+        self.display_mode = mode
+        self.layout_cache = None
+        self.queue_resize()
+        if self.fit_mode:
+            GLib.idle_add(self.refit)
+        GLib.idle_add(lambda: self.scroll_to_page(page) and False)
 
     def viewport_size(self):
         return self.scroller.get_width(), self.scroller.get_height()
@@ -361,6 +432,10 @@ class DocumentView(Gtk.Widget):
         max_width = max(
             self.doc.page_size(index)[0] for index in range(self.doc.page_count)
         )
+        if self.display_mode == "two":
+            # Fit a pair of pages side by side.
+            page_width = page_width * 2 + GAP / max(self.zoom, 0.01)
+            max_width = max_width * 2 + GAP / max(self.zoom, 0.01)
         available_width = viewport_width - 2 * MARGIN
         available_height = viewport_height - 2 * MARGIN
 
@@ -382,7 +457,7 @@ class DocumentView(Gtk.Widget):
     def on_scrolled(self, adjustment):
         self.queue_draw()
         rects = self.page_rects()
-        if not rects:
+        if not rects or self.display_mode == "single":
             return
         top, bottom = self.visible_range()
         middle = top + (bottom - top) * 0.35
@@ -396,6 +471,15 @@ class DocumentView(Gtk.Widget):
             self.emit("page-changed", page)
 
     def scroll_to_page(self, page, y=None):
+        if self.display_mode == "single" and self.doc is not None and 0 <= page < self.doc.page_count \
+                and page != self.current_page:
+            # Single page: show that page, then scroll within it.
+            self.current_page = page
+            self.layout_cache = None
+            self.queue_resize()
+            GLib.idle_add(lambda: self.scroll_to_page(page, y) and False)
+            self.emit("page-changed", page)
+            return
         rects = self.page_rects()
         if not 0 <= page < len(rects):
             return
@@ -692,6 +776,11 @@ class DocumentView(Gtk.Widget):
     # ========================================================
 
     def setup_controllers(self):
+        # Single page: scrolling on past the end of a page turns to the next one (as in Preview).
+        flip = Gtk.EventControllerScroll(flags=Gtk.EventControllerScrollFlags.VERTICAL)
+        flip.connect("scroll", self.on_flip_scroll)
+        self.add_controller(flip)
+
         drag = Gtk.GestureDrag()
         drag.set_button(Gdk.BUTTON_PRIMARY)
         drag.connect("drag-begin", self.on_drag_begin)

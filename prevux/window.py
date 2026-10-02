@@ -363,11 +363,19 @@ class PrevuxWindow(Adw.ApplicationWindow):
                     (_("Content Only"), "win.hide-sidebar", "<Control><Alt>1"),
                     (_("Thumbnails"), "win.show-sidebar", "<Control><Alt>2"),
                     (_("Table of Contents"), "win.show-contents", "<Control><Alt>3"),
+                    (_("Contact Sheet"), "win.show-sheet", "<Control><Alt>4"),
+                ),
+                section(
+                    (_("Continuous Scroll"), "win.display-mode::continuous", "<Control>1"),
+                    (_("Single Page"), "win.display-mode::single", "<Control>2"),
+                    (_("Two Pages"), "win.display-mode::two", "<Control>3"),
                 ),
                 section(
                     (_("Actual Size"), "win.actual-size", "<Control>0"),
                     (_("Zoom to Fit"), "win.zoom-fit", "<Control>9"),
                     (_("Zoom to Width"), "win.zoom-width"),
+                    (_("Zoom to Selection"), "win.zoom-selection", "<Control>asterisk"),
+                    (_("Zoom Level…"), "win.zoom-level"),
                     (_("Zoom In"), "win.zoom-in", "<Control>plus"),
                     (_("Zoom Out"), "win.zoom-out", "<Control>minus"),
                 ),
@@ -462,6 +470,9 @@ class PrevuxWindow(Adw.ApplicationWindow):
             "hide-sidebar": lambda: self.split.set_show_sidebar(False),
             "show-sidebar": lambda: self.show_sidebar_mode("thumbnails"),
             "show-contents": lambda: self.show_sidebar_mode("contents"),
+            "show-sheet": lambda: self.show_sidebar_mode("sheet"),
+            "zoom-selection": self.zoom_to_selection,
+            "zoom-level": self.ask_zoom_level,
             "actual-size": lambda: self.view.set_zoom(1.0),
             "zoom-fit": lambda: self.view.zoom_to_fit("page"),
             "zoom-width": lambda: self.view.zoom_to_fit("width"),
@@ -493,6 +504,11 @@ class PrevuxWindow(Adw.ApplicationWindow):
             self.add_action(action)
             self.actions[name] = action
 
+        mode = Gio.SimpleAction.new_stateful("display-mode", GLib.VariantType.new("s"), GLib.Variant.new_string("continuous"))
+        mode.connect("activate", self.on_display_mode)
+        self.add_action(mode)
+        self.actions["display-mode"] = mode
+
         action = Gio.SimpleAction.new("add-shape", GLib.VariantType.new("s"))
         action.connect("activate", lambda _action, param: self.view.insert_shape(param.get_string()))
         self.add_action(action)
@@ -509,7 +525,8 @@ class PrevuxWindow(Adw.ApplicationWindow):
 
         for name in (
             "close", "save", "export", "export-pdf", "print", "share", "show-in-files",
-            "actual-size", "zoom-fit", "zoom-width", "zoom-in", "zoom-out", "markup",
+            "actual-size", "zoom-fit", "zoom-width", "zoom-in", "zoom-out", "markup", "zoom-selection",
+            "zoom-level", "display-mode", "show-sheet",
             "rotate-left", "rotate-right", "inspector", "add-text", "add-shape", "go-to-page",
             "first-page", "last-page", "previous-page", "next-page", "select-all",
             "paste",
@@ -1198,7 +1215,35 @@ class PrevuxWindow(Adw.ApplicationWindow):
 
     def show_sidebar_mode(self, mode):
         self.sidebar.set_mode(mode, self.doc)
+        # The contact sheet needs room for a grid (Preview widens its sidebar too).
+        self.split.set_max_sidebar_width(420 if mode == "sheet" else 240)
+        self.split.set_sidebar_width_fraction(0.38 if mode == "sheet" else 0.25)
         self.split.set_show_sidebar(True)
+
+    def on_display_mode(self, action, value):
+        action.set_state(value)
+        self.view.set_display_mode(value.get_string())
+
+    def zoom_to_selection(self):
+        if not self.view.zoom_to_selection():
+            self.toast(_("Select an area with Rectangular Selection first."))
+
+    def ask_zoom_level(self):
+        """Type a zoom level in percent (Preview's Scale field)."""
+        dialog = Adw.AlertDialog(heading=_("Zoom Level"))
+        spin = Gtk.SpinButton.new_with_range(5, 1600, 5)
+        spin.set_value(round(self.view.zoom * 100))
+        spin.set_activates_default(True)
+        box = Gtk.Box(spacing=8, halign=Gtk.Align.CENTER)
+        box.append(spin)
+        box.append(Gtk.Label(label="%"))
+        dialog.set_extra_child(box)
+        dialog.add_response("cancel", _("Cancel"))
+        dialog.add_response("ok", _("OK"))
+        dialog.set_default_response("ok")
+        dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
+        dialog.connect("response", lambda _d, response: response == "ok" and self.view.set_zoom(spin.get_value() / 100))
+        dialog.present(self)
 
     def go_page(self, page):
         doc = self.doc
