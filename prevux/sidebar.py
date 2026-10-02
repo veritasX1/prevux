@@ -122,6 +122,18 @@ class Sidebar(Gtk.Box):
         self.stack.add_named(contents_scroller, "contents")
         self.stack.add_named(self.no_contents, "no-contents")
 
+        # Contact sheet: all pages as a grid (Preview: View → Contact Sheet).
+        self.sheet = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.SINGLE, homogeneous=True,
+                                 min_children_per_line=2, max_children_per_line=6,
+                                 column_spacing=6, row_spacing=6, valign=Gtk.Align.START)
+        self.sheet.set_margin_start(8)
+        self.sheet.set_margin_end(8)
+        self.sheet.set_margin_top(8)
+        self.sheet.connect("child-activated", self.on_sheet_activated)
+        sheet_scroller = Gtk.ScrolledWindow(vexpand=True, child=self.sheet)
+        sheet_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.stack.add_named(sheet_scroller, "sheet")
+
         # Search results, as in Preview's sidebar while searching.
         search_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.search_count = Gtk.Label(xalign=0)
@@ -217,6 +229,8 @@ class Sidebar(Gtk.Box):
             if page < doc.page_count:
                 try:
                     row.set_texture(doc.thumbnail(page, THUMBNAIL_SIZE * 2))
+                    if getattr(row, "sheet_picture", None) is not None:
+                        row.sheet_picture.set_paintable(row.picture.get_paintable())
                 except Exception as error:
                     print("Prevux: thumbnail failed:", error)
         return True
@@ -260,8 +274,33 @@ class Sidebar(Gtk.Box):
         self.mode = mode
         if mode == "contents":
             self.fill_contents(doc)
+        elif mode == "sheet":
+            self.fill_sheet()
         else:
             self.stack.set_visible_child_name("thumbnails")
+
+    def fill_sheet(self):
+        """The contact sheet shows the same thumbnails as the list, in a grid."""
+        while (child := self.sheet.get_first_child()) is not None:
+            self.sheet.remove(child)
+        for (doc_index, page), row in sorted(self.rows.items()):
+            picture = Gtk.Picture(can_shrink=True, content_fit=Gtk.ContentFit.CONTAIN)
+            picture.set_paintable(row.picture.get_paintable())
+            picture.set_size_request(96, 120)
+            picture.add_css_class("thumbnail")
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+            box.append(picture)
+            label = Gtk.Label(label=str(page + 1))
+            label.add_css_class("caption")
+            box.append(label)
+            child = Gtk.FlowBoxChild(child=box)
+            child.target = (doc_index, page)
+            row.sheet_picture = picture
+            self.sheet.append(child)
+        self.stack.set_visible_child_name("sheet")
+
+    def on_sheet_activated(self, flowbox, child):
+        self.emit("page-activated", *child.target)
 
     def fill_contents(self, doc):
         self.contents.remove_all()
