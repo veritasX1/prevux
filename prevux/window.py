@@ -13,8 +13,10 @@ from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk
 from PIL import Image, ImageEnhance, ImageOps
 
 from .documents import (
+    BOOK_EXTENSIONS,
     IMAGE_EXTENSIONS,
     PDF_EXTENSIONS,
+    TEXT_EXTENSIONS,
     ImageDocument,
     PDFDocument,
     pil_to_surface,
@@ -750,8 +752,8 @@ class PrevuxWindow(Adw.ApplicationWindow):
     def open_dialog(self):
         dialog = Gtk.FileDialog(title=_("Open"))
         filters = Gio.ListStore.new(Gtk.FileFilter)
-        supported = Gtk.FileFilter(name=_("Images and PDFs"))
-        for suffix in sorted(IMAGE_EXTENSIONS | PDF_EXTENSIONS):
+        supported = Gtk.FileFilter(name=_("All Supported Documents"))
+        for suffix in sorted(IMAGE_EXTENSIONS | PDF_EXTENSIONS | TEXT_EXTENSIONS | BOOK_EXTENSIONS):
             supported.add_suffix(suffix[1:])
         filters.append(supported)
         dialog.set_filters(filters)
@@ -805,6 +807,9 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.view.finish_editing()
         if getattr(doc, "untitled", False):
             self.export_dialog(then=then)
+            return
+        if getattr(doc, "converted", False):
+            self.export_dialog(pdf=True, then=then)
             return
         try:
             doc.save()
@@ -876,6 +881,10 @@ class PrevuxWindow(Adw.ApplicationWindow):
         except Exception as error:
             self.show_error(_("The document could not be exported."), str(error))
             return
+        if getattr(doc, "converted", False):
+            # From now on the PDF is the document; the original Markdown/e-book stays as it was.
+            doc.path = path
+            doc.converted = False
         self.after_save(doc)
         if then:
             then()
