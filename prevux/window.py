@@ -248,6 +248,11 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.view = DocumentView(self.scroller)
         self.view.defaults = self.defaults
         self.scroller.set_child(self.view)
+        # GTK wraps the view in a viewport that scrolls to the focused child – the whole page,
+        # i.e. to the top – whenever a text box gets the focus. Insertions must stay in view.
+        viewport = self.scroller.get_child()
+        if isinstance(viewport, Gtk.Viewport):
+            viewport.set_scroll_to_focus(False)
         self.view.connect("page-changed", self.on_view_page_changed)
         self.view.connect("selection-changed", self.on_view_selection_changed)
         self.view.connect("modified", self.on_view_modified)
