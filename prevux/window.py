@@ -52,6 +52,15 @@ def slot(widget):
     return box
 
 
+def human_size(size):
+    """1,4 MB – sizes as people read them."""
+    for unit in ("Bytes", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            text = f"{size:.0f}" if unit in ("Bytes", "KB") else f"{size:.1f}".replace(".", ",")
+            return f"{text} {unit}"
+        size /= 1024
+
+
 class PrevuxWindow(Adw.ApplicationWindow):
 
     def __init__(self, app):
@@ -332,6 +341,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
                     (_("Save"), "win.save", "<Control>s"),
                     (_("Export…"), "win.export", "<Control><Shift>s"),
                     (_("Export as PDF…"), "win.export-pdf"),
+                    (_("Export with Filter…"), "win.export-filtered"),
                     (_("Edit Permissions…"), "win.edit-permissions"),
                 ),
                 section(
@@ -502,6 +512,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
             "crop": self.crop,
             "remove-background": self.remove_background,
             "edit-permissions": self.edit_permissions,
+            "export-filtered": self.export_filtered,
             "adjust-color": self.adjust_color,
             "adjust-size": self.adjust_size,
             "add-text": lambda: self.view.insert_text(),
@@ -562,6 +573,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.enable("delete", has_doc and (self.view.selected is not None or getattr(self.view, "lasso", None) is not None))
         self.enable("remove-background", image)
         self.enable("edit-permissions", pdf)
+        self.enable("export-filtered", has_doc)
         self.enable("previous-document", self.doc_index > 0)
         self.enable("next-document", self.doc_index < len(self.documents) - 1)
 
@@ -1118,6 +1130,65 @@ class PrevuxWindow(Adw.ApplicationWindow):
             return
         self.view.delete_selected()
         self.update_state()
+
+    def export_filtered(self):
+        """Preview's Quartz filters: a smaller or recoloured copy, the original stays."""
+        doc = self.doc
+        if doc is None:
+            return
+        from .documents import FILTERS, export_filtered
+        self.view.finish_editing()
+        keys = [key for key, (_label, pdf, image, _suffix) in FILTERS.items() if (pdf if doc.kind == "pdf" else image)]
+        dialog = Adw.AlertDialog(heading=_("Export with Filter"),
+                                 body=_("Creates a copy – the original stays as it is."))
+        group = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        group.add_css_class("boxed-list")
+        first = None
+        buttons = {}
+        for key in keys:
+            check = Gtk.CheckButton(group=first)
+            first = first or check
+            row = Adw.ActionRow(title=_(FILTERS[key][0]), activatable_widget=check)
+            row.add_prefix(check)
+            group.append(row)
+            buttons[key] = check
+        first.set_active(True)
+        dialog.set_extra_child(group)
+        dialog.add_response("cancel", _("Cancel"))
+        dialog.add_response("export", _("Export…"))
+        dialog.set_default_response("export")
+        dialog.set_response_appearance("export", Adw.ResponseAppearance.SUGGESTED)
+
+        def chosen_filter(_dialog, response):
+            if response != "export":
+                return
+            key = next(k for k, b in buttons.items() if b.get_active())
+            stem = Path(doc.name).stem
+            suffix = ".pdf" if doc.kind == "pdf" else (".jpg" if key == "reduce" else Path(doc.name).suffix.lower())
+            files = Gtk.FileDialog(title=_("Export with Filter"))
+            files.set_initial_name(f"{stem} ({_(FILTERS[key][3])}){suffix}")
+            if not getattr(doc, "untitled", False):
+                files.set_initial_folder(Gio.File.new_for_path(str(Path(doc.path).parent)))
+
+            def saved(dialog, result):
+                try:
+                    path = dialog.save_finish(result).get_path()
+                except GLib.Error:
+                    return
+                try:
+                    export_filtered(doc, path, key)
+                except Exception as error:
+                    self.show_error(_("The document could not be exported."), str(error))
+                    return
+                before = Path(doc.path).stat().st_size if Path(doc.path).exists() else 0
+                after = Path(path).stat().st_size
+                if before:
+                    self.toast(_("Exported – {before} → {after}").format(before=human_size(before), after=human_size(after)))
+                else:
+                    self.toast(_("Exported"))
+            files.save(self, None, saved)
+        dialog.connect("response", chosen_filter)
+        dialog.present(self)
 
     def edit_permissions(self):
         doc = self.doc
