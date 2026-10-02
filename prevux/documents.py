@@ -1219,3 +1219,46 @@ def book_to_pdf(path):
         return source.convert_to_pdf()
     finally:
         source.close()
+
+
+# --- export filters (Preview: Export → Quartz Filter) ------------------
+
+FILTERS = {
+    # key: (label, for PDFs, for images, file name suffix)
+    "reduce": ("Reduce File Size", True, True, "small"),
+    "gray": ("Grayscale", True, True, "grayscale"),
+    "bw": ("Black & White", False, True, "black and white"),
+    "sepia": ("Sepia", False, True, "sepia"),
+}
+
+
+def export_filtered(doc, path, key):
+    """Write a filtered copy of the document; the document itself stays as it is."""
+    if doc.kind == "pdf":
+        added = doc.export_annotations()
+        try:
+            copy = pymupdf.open("pdf", doc.doc.tobytes())
+        finally:
+            doc.remove_exported(added)
+        if key == "reduce":
+            copy.rewrite_images(dpi_threshold=150, dpi_target=120, quality=60)
+        elif key == "gray":
+            copy.recolor(1)
+            # Recolouring stores images uncompressed: compress them again, same resolution.
+            copy.rewrite_images(quality=85, set_to_gray=True)
+        copy.save(str(path), garbage=4, deflate=True, clean=True)
+        copy.close()
+        return
+    image = doc.composited().convert("RGB")
+    if key == "reduce":
+        image.thumbnail((2000, 2000))
+        image.save(str(path), "JPEG", quality=70, optimize=True)
+        return
+    if key == "gray":
+        image = ImageOps.grayscale(image)
+    elif key == "bw":
+        image = ImageOps.grayscale(image).point(lambda v: 255 if v > 140 else 0).convert("1")
+    elif key == "sepia":
+        image = ImageOps.colorize(ImageOps.grayscale(image), "#2e1f0f", "#f3e3c3", mid="#a07850")
+    suffix = Path(path).suffix.lower()
+    image.save(str(path), "JPEG" if suffix in (".jpg", ".jpeg") else (Image.registered_extensions().get(suffix) or "PNG"))
