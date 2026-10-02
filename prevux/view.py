@@ -976,13 +976,18 @@ class DocumentView(Gtk.Widget):
             return
         page, px, py = located
 
-        if self.tool == "sketch":
+        if self.tool in ("sketch", "draw"):
             px, py = self.clamp_to_page(page, px, py)
             self.doc.checkpoint()
             ink = InkAnnotation([[(px, py)]], self.defaults.shape_style())
+            if self.tool == "draw":
+                pressure = self.pen_pressure(gesture)
+                ink.pressure = pressure is not None
+                ink.widths = [[self.pressure_factor(pressure) if ink.pressure else 0.8]]
             self.doc.annotations[page].append(ink)
             self.select(None)
-            self.action = {"type": "sketch", "annotation": ink, "page": page}
+            self.action = {"type": self.tool, "annotation": ink, "page": page,
+                           "time": self.event_time(gesture)}
             self.queue_draw()
             return
 
@@ -1078,12 +1083,16 @@ class DocumentView(Gtk.Widget):
             self.action["last"] = (px, py)
             self.notify_modified()
 
-        elif kind == "sketch":
+        elif kind in ("sketch", "draw"):
             px, py = self.clamp_to_page(page, px, py)
-            stroke = self.action["annotation"].strokes[-1]
+            ink = self.action["annotation"]
+            stroke = ink.strokes[-1]
             last_x, last_y = stroke[-1]
-            if math.hypot(px - last_x, py - last_y) * self.zoom >= 1.5:
+            distance = math.hypot(px - last_x, py - last_y) * self.zoom
+            if distance >= 1.5:
                 stroke.append((px, py))
+                if kind == "draw":
+                    ink.widths[-1].append(self.draw_width(gesture, ink, distance))
                 self.queue_draw()
 
         elif kind == "lasso":
@@ -1117,6 +1126,9 @@ class DocumentView(Gtk.Widget):
         if kind == "sketch":
             self.recognize_sketch(action["annotation"], action["page"])
             self.notify_modified()
+
+        elif kind == "draw":
+            self.notify_modified()        # Draw keeps the line as drawn – no shape recognition
 
         elif kind == "lasso":
             # Smart Lasso: the rough outline snaps to the object's edge.
@@ -1155,6 +1167,44 @@ class DocumentView(Gtk.Widget):
                 self.queue_draw()
             self.emit("selection-changed")
 
+    # ---- Draw: pen pressure --------------------------------
+
+    @staticmethod
+    def pen_pressure(gesture):
+        """0…1 from a pen or graphics tablet, None for a mouse or touchpad."""
+        event = gesture.get_current_event()
+        if event is None:
+            return None
+        device = event.get_device()
+        if device is None or device.get_source() not in (Gdk.InputSource.PEN, Gdk.InputSource.TABLET_PAD):
+            return None
+        found, value = event.get_axis(Gdk.AxisUse.PRESSURE)
+        return value if found else None
+
+    @staticmethod
+    def pressure_factor(pressure):
+        return 0.15 + 1.35 * max(0.0, min(1.0, pressure))
+
+    @staticmethod
+    def event_time(gesture):
+        event = gesture.get_current_event()
+        return event.get_time() if event is not None else 0
+
+    def draw_width(self, gesture, ink, distance):
+        """Width factor of the next point: the pen's pressure, or – with a mouse – the speed:
+        slow lines get fuller, fast ones finer, like ink from a nib."""
+        previous = ink.widths[-1][-1]
+        if ink.pressure:
+            pressure = self.pen_pressure(gesture)
+            target = self.pressure_factor(pressure) if pressure is not None else previous
+            return previous * 0.4 + target * 0.6
+        now = self.event_time(gesture)
+        elapsed = max(1, now - (self.action.get("time") or now))
+        self.action["time"] = now
+        speed = distance / elapsed                     # screen pixels per millisecond
+        target = 1.35 - 0.85 * min(1.0, speed / 2.5)
+        return previous * 0.75 + target * 0.25
+
     def recognize_sketch(self, ink, page):
         result = recognize(ink.strokes[-1])
         if result is None:
@@ -1185,7 +1235,7 @@ class DocumentView(Gtk.Widget):
             located = self.page_at(x, y, clamp=False)
             if located is not None:
                 page, px, py = located
-                if self.tool == "sketch":
+                if self.tool in ("sketch", "draw"):
                     name = "crosshair"
                 elif self.tool == "note":
                     name = "copy"

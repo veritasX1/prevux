@@ -206,6 +206,24 @@ def icon_sketch(cr):
     _stroke(cr, 1.0)
 
 
+def icon_draw(cr):
+    """A nib leaving a line that swells and thins – drawing with pressure."""
+    cr.move_to(1.2, 12.6)
+    cr.curve_to(3.2, 8.0, 5.0, 6.6, 6.4, 9.2)
+    cr.curve_to(7.4, 11.2, 8.6, 11.0, 9.6, 9.6)
+    cr.curve_to(8.6, 12.6, 6.4, 13.0, 5.4, 10.6)
+    cr.curve_to(4.6, 8.8, 3.6, 9.4, 1.2, 12.6)
+    cr.close_path()
+    cr.fill()
+    cr.move_to(9.6, 12.4)
+    cr.line_to(10.2, 10.2)
+    cr.line_to(14.0, 6.4)
+    cr.line_to(15.4, 7.8)
+    cr.line_to(11.6, 11.6)
+    cr.close_path()
+    _stroke(cr, 1.0)
+
+
 def icon_shapes(cr):
     rounded_rectangle(cr, 1.5, 1.5, 8.5, 8.5, 1.2)
     _stroke(cr)
