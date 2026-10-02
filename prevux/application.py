@@ -34,6 +34,7 @@ ACCELERATORS = {
     "win.show-bookmarks": ["<Control><Alt>5"],
     "win.bookmark": ["<Control>d"],
     "win.slideshow": ["<Control><Shift>f"],
+    "win.duplicate": ["<Control><Shift>d"],
     "win.next-tab": ["<Control>Tab", "<Control>Page_Down"],
     "win.previous-tab": ["<Control><Shift>Tab", "<Control><Shift>ISO_Left_Tab", "<Control>Page_Up"],
     "win.display-mode::continuous": ["<Control>1"],

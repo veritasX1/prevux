@@ -250,7 +250,14 @@ class PrevuxWindow(Adw.ApplicationWindow):
         header.set_title_widget(bar)
         self.apply_toolbar_settings()
 
-        content_view.add_top_bar(header)
+        # Header, tabs and markup bar sit on one sheet of glass the pages scroll under
+        # (Apple: materials / Liquid Glass). See glass.py.
+        from .glass import GlassBar
+        self.glass = GlassBar(on_height=lambda height: self.view.set_top_inset(height))
+        self.glass.append(header)
+        content_view.add_top_bar(self.glass)
+        content_view.set_top_bar_style(Adw.ToolbarStyle.FLAT)
+        self.content_view = content_view
 
         # Like a Mac toolbar, less important items give way when space
         # runs out; everything stays reachable through the menu.
@@ -279,7 +286,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.tab_view.connect("page-reordered", self.on_tab_reordered)
         self.tab_view.connect("create-window", self.on_tab_create_window)
         self.tab_bar = Adw.TabBar(view=self.tab_view, autohide=True)
-        content_view.add_top_bar(self.tab_bar)
+        self.glass.append(self.tab_bar)
 
         self.markup = MarkupToolbar(self)
         markup_scroller = Gtk.ScrolledWindow(child=self.markup)
@@ -287,7 +294,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
         markup_scroller.set_propagate_natural_height(True)
         self.markup_revealer = Gtk.Revealer(child=markup_scroller)
         self.markup_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
-        content_view.add_top_bar(self.markup_revealer)
+        self.glass.append(self.markup_revealer)
 
         # --- document area ------------------------------------
         self.scroller = Gtk.ScrolledWindow()
@@ -322,6 +329,10 @@ class PrevuxWindow(Adw.ApplicationWindow):
 
         self.toasts = Adw.ToastOverlay(child=self.stack)
         content_view.set_content(self.toasts)
+        self.glass.set_behind(self.stack)
+        self.apply_transparency()
+        from .icons import label_icon_buttons
+        GLib.idle_add(lambda: label_icon_buttons(self) and False)
         self.split.set_content(self.content_bin)
         self.set_content(self.split)
 
@@ -726,10 +737,6 @@ class PrevuxWindow(Adw.ApplicationWindow):
             subtitle = f"{width} × {height} px"
         if proof_name:
             subtitle += "  ·  " + _("Soft Proof: {name}").format(name=proof_name)
-        if len(self.documents) > 1:
-            subtitle += "  ·  " + _("{index} of {count} documents").format(
-                index=self.doc_index + 1, count=len(self.documents),
-            )
         self.subtitle_label.set_text(subtitle)
         self.subtitle_label.set_visible(True)
 
@@ -782,6 +789,10 @@ class PrevuxWindow(Adw.ApplicationWindow):
 
         if keyval in (Gdk.KEY_Delete, Gdk.KEY_BackSpace, Gdk.KEY_KP_Delete):
             return self.view.delete_selected()
+
+        if keyval in (Gdk.KEY_Home, Gdk.KEY_End) and not control:
+            self.go_page(0 if keyval == Gdk.KEY_Home else self.doc.page_count - 1)
+            return True
 
         if keyval == Gdk.KEY_Escape:
             if self.view.selected is not None:
@@ -1024,6 +1035,12 @@ class PrevuxWindow(Adw.ApplicationWindow):
             self.add_documents(documents)
         self.present()
 
+    def apply_transparency(self):
+        """Settings → Reduce transparency: a solid toolbar, pages start below it."""
+        transparent = not settings.get("reduce_transparency")
+        self.content_view.set_extend_content_to_top_edge(transparent)
+        self.glass.set_transparent(transparent)
+
     def apply_toolbar_settings(self):
         hidden = set(settings.get("toolbar_hidden") or [])
         for key, holder in self.toolbar_items.items():
@@ -1081,6 +1098,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
 
     def settings_changed(self):
         self.apply_toolbar_settings()
+        self.apply_transparency()
         self.update_state()
 
     def ask_password(self, path):

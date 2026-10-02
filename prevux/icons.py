@@ -595,10 +595,30 @@ class Swatch(Gtk.Widget):
 TOOLBAR = 20
 
 
+def accessible_name(widget, label):
+    """Screen readers get the tooltip as the name of an icon-only button."""
+    widget.update_property([Gtk.AccessibleProperty.LABEL], [label])
+
+
+def label_icon_buttons(root):
+    """Give every icon-only button below `root` its tooltip as accessible name."""
+    stack = [root]
+    while stack:
+        widget = stack.pop()
+        if isinstance(widget, (Gtk.Button, Gtk.MenuButton)) and widget.get_tooltip_text() \
+                and not getattr(widget, "get_label", lambda: None)():
+            accessible_name(widget, widget.get_tooltip_text())
+        child = widget.get_first_child()
+        while child is not None:
+            stack.append(child)
+            child = child.get_next_sibling()
+
+
 def icon_button(name, tooltip, toggle=False, size=TOOLBAR):
     button = Gtk.ToggleButton() if toggle else Gtk.Button()
     button.set_child(Icon(name, size))
     button.set_tooltip_text(tooltip)
+    accessible_name(button, tooltip)
     button.add_css_class("flat")
     return button
 
@@ -607,6 +627,7 @@ def icon_menu_button(name, tooltip, popover=None, size=TOOLBAR):
     button = Gtk.MenuButton()
     button.set_child(Icon(name, size))
     button.set_tooltip_text(tooltip)
+    accessible_name(button, tooltip)
     button.add_css_class("flat")
     if popover is not None:
         button.set_popover(popover)
