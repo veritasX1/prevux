@@ -78,6 +78,8 @@ class Sidebar(Gtk.Box):
         "delete-pages": (GObject.SignalFlags.RUN_FIRST, None, ()),
         "outline-activated": (GObject.SignalFlags.RUN_FIRST, None, (int, float)),
         "search-activated": (GObject.SignalFlags.RUN_FIRST, None, (int,)),
+        "bookmark-activated": (GObject.SignalFlags.RUN_FIRST, None, (int,)),
+        "bookmark-removed": (GObject.SignalFlags.RUN_FIRST, None, (int,)),
     }
 
     def __init__(self):
@@ -152,6 +154,19 @@ class Sidebar(Gtk.Box):
         results_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         search_box.append(results_scroller)
         self.stack.add_named(search_box, "search")
+
+        # Bookmarks (Preview: View → Bookmarks).
+        self.bookmark_list = Gtk.ListBox()
+        self.bookmark_list.add_css_class("navigation-sidebar")
+        self.bookmark_list.connect("row-activated", lambda _list, row: self.emit("bookmark-activated", row.page))
+        bookmarks_scroller = Gtk.ScrolledWindow(vexpand=True, child=self.bookmark_list)
+        bookmarks_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.stack.add_named(bookmarks_scroller, "bookmarks")
+        self.no_bookmarks = Adw.StatusPage(title=_("No Bookmarks"), icon_name="user-bookmarks-symbolic",
+                                           description=_("Choose Tools → Add Bookmark (Ctrl+D) to mark the current page."))
+        self.no_bookmarks.add_css_class("compact")
+        self.stack.add_named(self.no_bookmarks, "no-bookmarks")
+        self.bookmark_items = []
         self.append(self.stack)
         self.mode = "thumbnails"
         self.contents_doc = None
@@ -278,6 +293,8 @@ class Sidebar(Gtk.Box):
             self.fill_contents(doc)
         elif mode == "sheet":
             self.fill_sheet()
+        elif mode == "bookmarks":
+            self.fill_bookmarks()
         else:
             self.stack.set_visible_child_name("thumbnails")
 
@@ -300,6 +317,27 @@ class Sidebar(Gtk.Box):
             row.sheet_picture = picture
             self.sheet.append(child)
         self.stack.set_visible_child_name("sheet")
+
+    def set_bookmarks(self, items, doc=None):
+        """items: [(page, title, subtitle), …] of the current document."""
+        self.bookmark_items = list(items)
+        if self.mode == "bookmarks" and self.stack.get_visible_child_name() in ("bookmarks", "no-bookmarks"):
+            self.fill_bookmarks()
+
+    def fill_bookmarks(self):
+        self.bookmark_list.remove_all()
+        for page, title, subtitle in self.bookmark_items:
+            row = Adw.ActionRow(title=GLib.markup_escape_text(title), subtitle=GLib.markup_escape_text(subtitle),
+                                activatable=True)
+            row.page = page
+            row.add_prefix(Gtk.Image(icon_name="user-bookmarks-symbolic"))
+            remove = Gtk.Button(icon_name="edit-delete-symbolic", valign=Gtk.Align.CENTER,
+                                tooltip_text=_("Remove Bookmark"))
+            remove.add_css_class("flat")
+            remove.connect("clicked", lambda _button, page=page: self.emit("bookmark-removed", page))
+            row.add_suffix(remove)
+            self.bookmark_list.append(row)
+        self.stack.set_visible_child_name("bookmarks" if self.bookmark_items else "no-bookmarks")
 
     def on_sheet_activated(self, flowbox, child):
         self.emit("page-activated", *child.target)

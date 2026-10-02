@@ -78,6 +78,7 @@ class DocumentView(Gtk.Widget):
         self.zoom = 1.0
         self.fit_mode = "page"
         self.current_page = 0
+        self.bookmarks = set()          # bookmarked pages get a ribbon (set by the window)
         self.tool = "select"
         self.highlight_mode = None
 
@@ -572,6 +573,9 @@ class DocumentView(Gtk.Widget):
             cr.scale(self.zoom, self.zoom)
             self.draw_page_overlay(cr, index)
 
+            if index in self.bookmarks:
+                self.snapshot_ribbon(snapshot, x + w, y)
+
         if self.doc.kind == "pdf":
             keep = set(range(min(visible, default=0) - 2, max(visible, default=0) + 3))
             self.doc.evict(keep)
@@ -583,6 +587,20 @@ class DocumentView(Gtk.Widget):
 
         if self.field_editor is not None:
             self.snapshot_child(self.field_editor, snapshot)
+
+    def snapshot_ribbon(self, snapshot, right, top):
+        """A red bookmark ribbon hanging from the top-right corner of the page."""
+        width, height, margin = 12, 20, 14
+        cr = snapshot.append_cairo(Graphene.Rect().init(right - margin - width, top, width, height))
+        x = right - margin - width
+        cr.move_to(x, top)
+        cr.line_to(x + width, top)
+        cr.line_to(x + width, top + height)
+        cr.line_to(x + width / 2, top + height - 5)
+        cr.line_to(x, top + height)
+        cr.close_path()
+        cr.set_source_rgb(1.0, 0.23, 0.19)     # Apple system red
+        cr.fill()
 
     def snapshot_loupes(self, snapshot, index, texture, x, y, w, h):
         """Magnify the page texture inside each loupe."""
