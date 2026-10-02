@@ -257,6 +257,19 @@ GERMAN = {
     "No Table of Contents": "Kein Inhaltsverzeichnis",
     "Bookmarks": "Lesezeichen",
     "Slideshow": "Diashow",
+    "Fit into": "Einpassen in",
+    "Custom": "Eigene Größe",
+    "Centimeters": "Zentimeter",
+    "Millimeters": "Millimeter",
+    "Inches": "Zoll",
+    "Resolution": "Auflösung",
+    "Pixels per inch": "Pixel pro Zoll",
+    "Resample image": "Bild neu berechnen",
+    "Off: only the print size changes, every pixel stays": "Aus: Nur die Druckgröße ändert sich, jedes Pixel bleibt",
+    "{count} images are changed together.": "{count} Bilder werden gemeinsam geändert.",
+    "{w} × {h} pixels · {cw} × {ch} cm at {dpi} ppi": "{w} × {h} Pixel · {cw} × {ch} cm bei {dpi} ppi",
+    "{count} images, e.g. {w} × {h} pixels": "{count} Bilder, z. B. {w} × {h} Pixel",
+    "{count} images changed": "{count} Bilder geändert",
     "Previous": "Zurück",
     "Next": "Weiter",
     "End Slideshow": "Diashow beenden",
@@ -305,3 +318,9 @@ TABLE = GERMAN if _language() == "de" else {}
 
 def _(text):
     return TABLE.get(text, text)
+
+
+def decimal(value, digits=1):
+    """2,5 in German, 2.5 in English."""
+    text = f"{value:.{digits}f}"
+    return text.replace(".", ",") if TABLE else text

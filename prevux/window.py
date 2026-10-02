@@ -23,7 +23,7 @@ from .documents import (
     open_document,
 )
 from . import settings
-from .i18n import _
+from .i18n import _, decimal
 from .icons import Icon, Swatch, icon_button, icon_menu_button
 from .markup import MarkupDefaults, MarkupToolbar, popover_box
 from .model import HIGHLIGHT_COLORS, TextAnnotation, NoteAnnotation
@@ -1297,9 +1297,44 @@ class PrevuxWindow(Adw.ApplicationWindow):
             self.view.queue_draw()
         self.update_state()
 
+    def selected_images(self):
+        """The images marked in the sidebar (Preview edits them together), else the current one."""
+        chosen = []
+        for doc_index, _page in self.sidebar.selected_pages():
+            doc = self.documents[doc_index]
+            if doc.kind == "image" and doc not in chosen:
+                chosen.append(doc)
+        if len(chosen) > 1:
+            return chosen
+        return [self.doc] if self.doc is not None and self.doc.kind == "image" else []
+
+    def edit_images(self, docs, function):
+        """Apply function(doc) to every image, each with its own undo step."""
+        self.view.finish_editing()
+        for doc in docs:
+            doc.checkpoint(structure=True)
+            function(doc)
+            doc.modified = True
+        if self.doc in docs:
+            self.view.rect_selection = None
+            self.view.document_structure_changed()
+            self.view.refresh()
+        for doc in docs:
+            self.sidebar.refresh_document(self.documents.index(doc))
+        self.update_state()
+        self.update_titles()
+        for doc in docs:
+            GLib.timeout_add(600, lambda doc=doc: self.start_live_text(doc) and False)
+        if len(docs) > 1:
+            self.toast(_("{count} images changed").format(count=len(docs)))
+
     def rotate(self, degrees):
         doc = self.doc
         if doc is None:
+            return
+        images = self.selected_images()
+        if len(images) > 1:
+            self.edit_images(images, lambda image: image.rotate_page(0, degrees))
             return
         self.view.finish_editing()
         pages = [page for doc_index, page in self.sidebar.selected_pages() if doc_index == self.doc_index]
@@ -1312,12 +1347,9 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.after_edit(structure=True)
 
     def flip(self, horizontal):
-        doc = self.doc
-        if doc is None or doc.kind != "image":
-            return
-        doc.checkpoint(structure=True)
-        doc.flip(horizontal)
-        self.after_edit(structure=True)
+        images = self.selected_images()
+        if images:
+            self.edit_images(images, lambda image: image.flip(horizontal))
 
     def crop(self):
         doc = self.doc
@@ -1330,6 +1362,12 @@ class PrevuxWindow(Adw.ApplicationWindow):
             self.toast(_("Select an area with Rectangular Selection first."))
             return
         page, x0, y0, x1, y1 = self.view.rect_selection
+        images = self.selected_images() if doc.kind == "image" else []
+        if len(images) > 1:
+            # The same area (in pixels) is cut from every image, as in Preview.
+            box = (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
+            self.edit_images(images, lambda image: image.crop(0, box))
+            return
         doc.checkpoint(structure=True)
         doc.crop(page, (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)))
         self.view.rect_selection = None
@@ -1746,10 +1784,9 @@ class PrevuxWindow(Adw.ApplicationWindow):
     # ========================================================
 
     def adjust_size(self):
-        doc = self.doc
-        if doc is None or doc.kind != "image":
-            return
-        AdjustSizeDialog(self, doc).present(self)
+        images = self.selected_images()
+        if images:
+            AdjustSizeDialog(self, images).present(self)
 
     def adjust_color(self):
         doc = self.doc
@@ -1773,40 +1810,73 @@ class PrevuxWindow(Adw.ApplicationWindow):
 # ============================================================
 
 class AdjustSizeDialog(Adw.Dialog):
+    """Preview's Adjust Size: fit-into presets, pixels/percent/print units, resolution and
+    Resample. With several images marked, the same scaling is applied to each of them."""
 
-    def __init__(self, window, doc):
+    PRESETS = [(320, 240), (640, 480), (800, 600), (1024, 768), (1280, 720), (1280, 1024),
+               (1920, 1080), (2560, 1440), (3840, 2160)]
+    PRESET_NAMES = {(1280, 720): "HD", (1920, 1080): "Full HD", (3840, 2160): "4K"}
+    INCH = {"cm": 2.54, "mm": 25.4, "in": 1.0}
+
+    def __init__(self, window, docs):
         super().__init__(title=_("Adjust Size"))
         self.window = window
-        self.doc = doc
+        self.docs = docs
+        self.single = len(docs) == 1
+        doc = docs[0]
         self.width, self.height = doc.page_size(0)
+        self.original_dpi = doc.resolution()
+        self.px_w, self.px_h, self.dpi = float(self.width), float(self.height), self.original_dpi
+        self.units = ["px", "%", "cm", "mm", "in"] if self.single else ["%", "px"]
+        unit_names = {"px": _("Pixels"), "%": _("Percent"), "cm": _("Centimeters"), "mm": _("Millimeters"),
+                      "in": _("Inches")}
+        self.box = None             # several images in pixels: the size they are fitted into
         self.updating = False
-        self.set_content_width(360)
+        self.set_content_width(400)
 
         view = Adw.ToolbarView()
         view.add_top_bar(Adw.HeaderBar())
-
         page = Adw.PreferencesPage()
+
         group = Adw.PreferencesGroup()
+        names = [_("Custom")] + [
+            f"{w} × {h}" + (f" ({self.PRESET_NAMES[(w, h)]})" if (w, h) in self.PRESET_NAMES else "")
+            for w, h in self.PRESETS]
+        self.preset = Adw.ComboRow(title=_("Fit into"), model=Gtk.StringList.new(names))
+        self.preset.connect("notify::selected", self.on_preset)
+        group.add(self.preset)
+        page.add(group)
 
-        self.unit = Adw.ComboRow(title=_("Unit"), model=Gtk.StringList.new([_("Pixels"), _("Percent")]))
-        self.unit.connect("notify::selected", self.on_unit)
+        group = Adw.PreferencesGroup(
+            description=None if self.single else _("{count} images are changed together.").format(count=len(docs)))
+        self.unit = Adw.ComboRow(title=_("Unit"), model=Gtk.StringList.new([unit_names[u] for u in self.units]))
+        self.unit.connect("notify::selected", lambda *_args: self.show_values())
         group.add(self.unit)
-
-        self.width_row = Adw.SpinRow.new_with_range(1, 100000, 1)
+        self.width_row = Adw.SpinRow.new_with_range(0.01, 100000, 1)
         self.width_row.set_title(_("Width"))
-        self.width_row.set_value(self.width)
         self.width_row.connect("notify::value", self.on_value, "width")
         group.add(self.width_row)
-
-        self.height_row = Adw.SpinRow.new_with_range(1, 100000, 1)
+        self.height_row = Adw.SpinRow.new_with_range(0.01, 100000, 1)
         self.height_row.set_title(_("Height"))
-        self.height_row.set_value(self.height)
         self.height_row.connect("notify::value", self.on_value, "height")
         group.add(self.height_row)
-
+        self.resolution_row = Adw.SpinRow.new_with_range(1, 10000, 1)
+        self.resolution_row.set_title(_("Resolution"))
+        self.resolution_row.set_subtitle(_("Pixels per inch"))
+        self.resolution_row.connect("notify::value", self.on_resolution)
+        self.resolution_row.set_visible(self.single)
+        group.add(self.resolution_row)
         self.proportional = Adw.SwitchRow(title=_("Scale proportionally"), active=True)
+        self.proportional.connect("notify::active", lambda *_args: self.on_proportional())
         group.add(self.proportional)
+        self.resample = Adw.SwitchRow(title=_("Resample image"), active=True,
+                                      subtitle=_("Off: only the print size changes, every pixel stays"))
+        self.resample.connect("notify::active", lambda *_args: self.show_values())
+        self.resample.set_visible(self.single)
+        group.add(self.resample)
+        page.add(group)
 
+        group = Adw.PreferencesGroup()
         self.result = Adw.ActionRow(title=_("Resulting Size"))
         self.result.add_css_class("property")
         group.add(self.result)
@@ -1828,56 +1898,167 @@ class AdjustSizeDialog(Adw.Dialog):
         box.append(buttons)
         view.set_content(box)
         self.set_child(view)
-        self.update_result()
+        self.show_values()
 
-    def percent(self):
-        return self.unit.get_selected() == 1
+    # ---- units -----------------------------------------------
 
-    def target(self):
-        width = self.width_row.get_value()
-        height = self.height_row.get_value()
-        if self.percent():
-            width = self.width * width / 100
-            height = self.height * height / 100
-        return max(1, int(round(width))), max(1, int(round(height)))
+    def current_unit(self):
+        return self.units[self.unit.get_selected()]
 
-    def on_unit(self, row, _param):
+    def to_unit(self, pixels, original):
+        unit = self.current_unit()
+        if unit == "px":
+            return pixels
+        if unit == "%":
+            return pixels / original * 100
+        return pixels / self.dpi * self.INCH[unit]
+
+    def show_values(self):
+        """Fill the fields from the target size (in the chosen unit)."""
+        unit = self.current_unit()
         self.updating = True
-        if self.percent():
-            self.width_row.set_value(100)
-            self.height_row.set_value(100)
+        digits = 0 if unit in ("px", "%") else 2
+        for row in (self.width_row, self.height_row):
+            row.set_digits(digits)
+            row.get_adjustment().set_step_increment(1 if digits == 0 else 0.1)
+        if not self.single and unit == "px":
+            box = self.box or (self.width, self.height)
+            self.width_row.set_value(box[0])
+            self.height_row.set_value(box[1])
         else:
-            self.width_row.set_value(self.width)
-            self.height_row.set_value(self.height)
+            self.width_row.set_value(self.to_unit(self.px_w, self.width))
+            self.height_row.set_value(self.to_unit(self.px_h, self.height))
+        self.resolution_row.set_value(self.dpi)
+        # Without resampling the pixels are fixed: only print size and resolution can change.
+        fixed = self.single and not self.resample.get_active() and unit in ("px", "%")
+        self.width_row.set_sensitive(not fixed)
+        self.height_row.set_sensitive(not fixed)
         self.updating = False
         self.update_result()
+
+    # ---- changes ---------------------------------------------
+
+    def on_preset(self, row, _param):
+        index = row.get_selected()
+        if self.updating or index == 0:
+            return
+        box = self.PRESETS[index - 1]
+        self.resample.set_active(True)
+        if self.single:
+            scale = min(box[0] / self.width, box[1] / self.height)
+            self.px_w, self.px_h = self.width * scale, self.height * scale
+        else:
+            self.box = box
+            self.proportional.set_active(True)
+        self.updating = True
+        self.unit.set_selected(self.units.index("px"))
+        self.updating = False
+        self.show_values()
 
     def on_value(self, row, _param, which):
         if self.updating:
             return
-        if self.proportional.get_active():
-            self.updating = True
-            value = row.get_value()
-            if self.percent():
-                other = value
-            elif which == "width":
-                other = value * self.height / self.width
-            else:
-                other = value * self.width / self.height
-            (self.height_row if which == "width" else self.width_row).set_value(round(other))
-            self.updating = False
-        self.update_result()
+        self.updating = True
+        self.preset.set_selected(0)
+        self.updating = False
+        value = row.get_value()
+        unit = self.current_unit()
+        original = self.width if which == "width" else self.height
+        ratio = self.height / self.width if which == "width" else self.width / self.height
+        if not self.single and unit == "px":
+            box = list(self.box or (self.width, self.height))
+            box[0 if which == "width" else 1] = value
+            if self.proportional.get_active():
+                box[1 if which == "width" else 0] = value * ratio
+            self.box = (max(1, round(box[0])), max(1, round(box[1])))
+            self.show_values()
+            return
+        if unit == "px":
+            pixels = value
+        elif unit == "%":
+            pixels = original * value / 100
+        else:
+            inches = value / self.INCH[unit]
+            if not self.resample.get_active():
+                # The pixels stay; a different print size means a different resolution.
+                self.dpi = original / max(inches, 0.0001)
+                self.show_values()
+                return
+            pixels = inches * self.dpi
+        if which == "width":
+            self.px_w = pixels
+            if self.proportional.get_active():
+                self.px_h = pixels * ratio
+        else:
+            self.px_h = pixels
+            if self.proportional.get_active():
+                self.px_w = pixels * ratio
+        self.show_values()
+
+    def on_resolution(self, row, _param):
+        if self.updating:
+            return
+        new = row.get_value()
+        if self.resample.get_active() and self.current_unit() in self.INCH:
+            # Same print size at a different resolution: more or fewer pixels.
+            self.px_w *= new / self.dpi
+            self.px_h *= new / self.dpi
+        self.dpi = new
+        self.show_values()
+
+    def on_proportional(self):
+        if self.proportional.get_active() and self.single:
+            self.px_h = self.px_w * self.height / self.width
+            self.show_values()
+
+    # ---- result ----------------------------------------------
+
+    def target(self, doc):
+        """Pixel size for one image."""
+        width, height = doc.page_size(0)
+        if self.single:
+            return max(1, round(self.px_w)), max(1, round(self.px_h))
+        unit = self.current_unit()
+        if unit == "%":
+            fx = self.width_row.get_value() / 100
+            fy = self.height_row.get_value() / 100 if not self.proportional.get_active() else fx
+            return max(1, round(width * fx)), max(1, round(height * fy))
+        box = self.box or (self.width, self.height)
+        if not self.proportional.get_active():
+            return box
+        scale = min(box[0] / width, box[1] / height)
+        return max(1, round(width * scale)), max(1, round(height * scale))
 
     def update_result(self):
-        width, height = self.target()
-        self.result.set_subtitle(f"{width} × {height} px")
+        if self.single:
+            width, height = self.target(self.docs[0])
+            cm_w, cm_h = width / self.dpi * 2.54, height / self.dpi * 2.54
+            self.result.set_subtitle(
+                _("{w} × {h} pixels · {cw} × {ch} cm at {dpi} ppi").format(
+                    w=width, h=height, cw=decimal(cm_w), ch=decimal(cm_h), dpi=round(self.dpi)))
+        else:
+            sizes = [self.target(doc) for doc in self.docs]
+            first = sizes[0]
+            self.result.set_subtitle(
+                _("{count} images, e.g. {w} × {h} pixels").format(count=len(sizes), w=first[0], h=first[1]))
 
     def on_apply(self, button):
-        width, height = self.target()
-        if (width, height) != (self.width, self.height):
-            self.doc.checkpoint(structure=True)
-            self.doc.resize(width, height)
-            self.window.after_edit(structure=True)
+        changes = []
+        for doc in self.docs:
+            size = self.target(doc)
+            dpi = self.dpi if self.single and abs(self.dpi - self.original_dpi) > 0.01 else None
+            if tuple(size) != tuple(doc.page_size(0)) or dpi:
+                changes.append((doc, size, dpi))
+        if changes:
+            plan = {id(doc): (size, dpi) for doc, size, dpi in changes}
+
+            def apply(doc):
+                size, dpi = plan[id(doc)]
+                if tuple(size) != tuple(doc.page_size(0)):
+                    doc.resize(*size)
+                if dpi:
+                    doc.set_resolution(dpi)
+            self.window.edit_images([doc for doc, _size, _dpi in changes], apply)
         self.close()
 
 
