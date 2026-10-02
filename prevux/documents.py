@@ -255,6 +255,12 @@ class ImageDocument(BaseDocument):
         with Image.open(path) as image:
             self.format = image.format
             self.dpi = image.info.get("dpi")
+            # Camera data travels along when saving (the turn is already in the pixels).
+            self.exif = Image.Exif()
+            try:
+                self.exif.load(image.getexif().tobytes())
+            except Exception:
+                pass
             image = ImageOps.exif_transpose(image)
             if image.mode not in ("RGB", "RGBA"):
                 image = image.convert("RGBA")
@@ -307,10 +313,43 @@ class ImageDocument(BaseDocument):
         return max(2.0, min(self.image.size) / 250)
 
     def structure_data(self):
-        return (self.image.copy(), self.dpi)
+        exif = Image.Exif()
+        exif.load(self.exif.tobytes())
+        return (self.image.copy(), self.dpi, exif)
 
     def restore_structure(self, data):
-        self.image, self.dpi = data
+        self.image, self.dpi, self.exif = data
+
+    # --- location (Preview: Inspector → GPS) ----------------------
+
+    GPS_IFD = 0x8825
+
+    def location(self):
+        """(latitude, longitude, altitude or None) from the photo's GPS data, or None."""
+        try:
+            gps = self.exif.get_ifd(self.GPS_IFD)
+        except Exception:
+            return None
+        if not gps or 2 not in gps or 4 not in gps:
+            return None
+
+        def degrees(value, ref):
+            d, m, sec = (float(part) for part in value)
+            result = d + m / 60 + sec / 3600
+            return -result if str(ref).upper() in ("S", "W") else result
+        try:
+            latitude = degrees(gps[2], gps.get(1, "N"))
+            longitude = degrees(gps[4], gps.get(3, "E"))
+            altitude = float(gps[6]) * (-1 if gps.get(5) in (1, b"\x01") else 1) if 6 in gps else None
+        except (TypeError, ValueError, ZeroDivisionError):
+            return None
+        return latitude, longitude, altitude
+
+    def remove_location(self):
+        """Delete the GPS data; it is gone from the file once saved."""
+        if self.GPS_IFD in self.exif:
+            del self.exif[self.GPS_IFD]
+        self.changed()
 
     def resolution(self):
         """Pixels per inch stored in the file (72 if it says nothing, as Preview assumes)."""
@@ -426,6 +465,11 @@ class ImageDocument(BaseDocument):
             options["quality"] = 92
         if self.dpi:
             options["dpi"] = self.dpi
+        if len(self.exif) and suffix in (".jpg", ".jpeg", ".png", ".webp"):
+            exif = Image.Exif()
+            exif.load(self.exif.tobytes())
+            exif[0x0112] = 1                 # orientation: the pixels are already upright
+            options["exif"] = exif.tobytes()
 
         temp = path + ".prevux-tmp"
         image.save(temp, format_name or Image.registered_extensions().get(suffix), **options)

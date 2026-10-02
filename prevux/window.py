@@ -2133,7 +2133,67 @@ class PrevuxWindow(Adw.ApplicationWindow):
             content.set_wrap_mode(2)
             grid.attach(content, 1, row, 1, 1)
         box.append(grid)
+        location = doc.location() if doc.kind == "image" else None
+        if location:
+            box.append(self.location_section(doc, location))
         self.info_popover.set_child(box)
+
+    def location_section(self, doc, location):
+        """Where the photo was taken. No map is loaded here: only a click hands the place
+        to the maps app or the browser, so nothing leaves the computer unasked."""
+        latitude, longitude, altitude = location
+        section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        section.set_margin_top(10)
+        heading = Gtk.Label(label=_("Location"), xalign=0)
+        heading.add_css_class("heading")
+        section.append(heading)
+        text = "{lat}° {ns}, {lon}° {ew}".format(
+            lat=decimal(abs(latitude), 5), ns=_("N") if latitude >= 0 else _("S"),
+            lon=decimal(abs(longitude), 5), ew=_("E") if longitude >= 0 else _("W"))
+        if altitude is not None:
+            text += "\n" + _("Altitude {meters} m").format(meters=decimal(altitude, 0))
+        section.append(Gtk.Label(label=text, xalign=0, selectable=True))
+        note = Gtk.Label(label=_("Prevux loads no map. A click opens the place in Maps or the browser."),
+                         xalign=0, wrap=True, max_width_chars=34)
+        note.add_css_class("dim-label")
+        note.add_css_class("caption")
+        section.append(note)
+
+        def launch(uri):
+            self.info_popover.popdown()
+            Gtk.UriLauncher.new(uri).launch(self, None, launched)
+
+        def launched(launcher, result):
+            try:
+                launcher.launch_finish(result)
+            except GLib.Error:
+                self.toast(_("No app for maps is installed – try the browser."))
+
+        buttons = Gtk.Box(spacing=6, homogeneous=True)
+        maps = Gtk.Button(label=_("Open in Maps"))
+        maps.connect("clicked", lambda _b: launch(f"geo:{latitude:.6f},{longitude:.6f}"))
+        browser = Gtk.Button(label=_("Show in Browser"))
+        browser.set_tooltip_text("OpenStreetMap")
+        browser.connect("clicked", lambda _b: launch(
+            f"https://www.openstreetmap.org/?mlat={latitude:.6f}&mlon={longitude:.6f}#map=16/{latitude:.6f}/{longitude:.6f}"))
+        buttons.append(maps)
+        buttons.append(browser)
+        section.append(buttons)
+
+        remove = Gtk.Button(label=_("Remove Location Info"))
+        remove.add_css_class("destructive-action")
+        remove.connect("clicked", lambda _b: self.remove_location(doc))
+        section.append(remove)
+        return section
+
+    def remove_location(self, doc):
+        self.info_popover.popdown()
+        doc.checkpoint(structure=True)
+        doc.remove_location()
+        doc.modified = True
+        self.update_state()
+        self.update_titles()
+        self.toast(_("Location removed – save to remove it from the file"))
 
     # ========================================================
     # IMAGE ADJUSTMENTS
