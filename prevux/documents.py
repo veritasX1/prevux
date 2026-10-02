@@ -261,10 +261,15 @@ class ImageDocument(BaseDocument):
                 self.exif.load(image.getexif().tobytes())
             except Exception:
                 pass
+            self.icc = image.info.get("icc_profile")      # colour profile, None = sRGB
             image = ImageOps.exif_transpose(image)
+            if image.mode == "CMYK" and self.icc:
+                from .colors import cmyk_to_rgb
+                image, self.icc = cmyk_to_rgb(image, self.icc), None
             if image.mode not in ("RGB", "RGBA"):
                 image = image.convert("RGBA")
             self.image = image.copy()
+        self.proof = None            # soft proof: path of the simulated device's profile
         self.annotations = [[]]
         self._texture = None
         self.ocr_words = None        # Live Text, filled in the background
@@ -293,13 +298,15 @@ class ImageDocument(BaseDocument):
 
     def texture(self, index=0, scale=None):
         if self._texture is None:
-            self._texture = pil_to_texture(self.image)
+            from .colors import for_screen
+            self._texture = pil_to_texture(for_screen(self.image, self.icc, self.proof))
         return self._texture, 1.0
 
     def thumbnail(self, index, max_size):
+        from .colors import for_screen
         image = self.composited()
         image.thumbnail((max_size, max_size))
-        return pil_to_texture(image)
+        return pil_to_texture(for_screen(image, self.icc))
 
     def changed(self):
         super().changed()
@@ -315,10 +322,21 @@ class ImageDocument(BaseDocument):
     def structure_data(self):
         exif = Image.Exif()
         exif.load(self.exif.tobytes())
-        return (self.image.copy(), self.dpi, exif)
+        return (self.image.copy(), self.dpi, exif, self.icc)
 
     def restore_structure(self, data):
-        self.image, self.dpi, self.exif = data
+        self.image, self.dpi, self.exif, self.icc = data
+
+    # --- colour (Preview: Assign Profile, Soft Proof) -------------
+
+    def assign_profile(self, icc):
+        """Read the same pixel values in another colour space; the pixels stay."""
+        self.icc = icc
+        self.changed()
+
+    def set_proof(self, profile):
+        self.proof = profile
+        self._texture = None
 
     # --- location (Preview: Inspector → GPS) ----------------------
 
@@ -470,6 +488,8 @@ class ImageDocument(BaseDocument):
             exif.load(self.exif.tobytes())
             exif[0x0112] = 1                 # orientation: the pixels are already upright
             options["exif"] = exif.tobytes()
+        if self.icc and suffix in (".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff"):
+            options["icc_profile"] = self.icc
 
         temp = path + ".prevux-tmp"
         image.save(temp, format_name or Image.registered_extensions().get(suffix), **options)
@@ -483,6 +503,8 @@ class ImageDocument(BaseDocument):
         info = super().info()
         info["type"] = self.format or "Image"
         info["dimensions"] = f"{self.image.width} × {self.image.height}"
+        from .colors import name
+        info["profile"] = name(self.icc) if self.icc else None
         return info
 
 
@@ -503,6 +525,11 @@ class PDFDocument(BaseDocument):
         self.cache = {}
         self.words = {}
         self.fields = {}
+        self.proof = None            # soft proof: path of the simulated device's profile
+
+    def set_proof(self, profile):
+        self.proof = profile
+        self.cache.clear()
 
     def page_size(self, index):
         rect = self.doc[index].rect
@@ -538,7 +565,12 @@ class PDFDocument(BaseDocument):
         pixmap = self.doc[index].get_pixmap(
             matrix=pymupdf.Matrix(scale, scale), alpha=False, annots=True,
         )
-        texture = pixmap_to_texture(pixmap)
+        if self.proof:
+            from .colors import for_screen
+            image = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
+            texture = pil_to_texture(for_screen(image, None, self.proof))
+        else:
+            texture = pixmap_to_texture(pixmap)
         self.cache[index] = (texture, scale)
         return texture
 
