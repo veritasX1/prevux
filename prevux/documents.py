@@ -307,6 +307,33 @@ class ImageDocument(BaseDocument):
             annotation.reorient(function)
         self.changed()
 
+    def remove_background(self):
+        from .cutout import remove_background
+        self.image = remove_background(self.image)
+        self.changed()
+
+    def crop_to_cutout(self, box, cut):
+        """Smart Lasso → Crop: keep only the cut-out object, transparent around it."""
+        self.image = cut.copy()
+        for annotation in self.annotations[0]:
+            annotation.move(-box[0], -box[1])
+        self.changed()
+
+    def erase_cutout(self, box, cut):
+        """Smart Lasso → Delete: the object becomes transparent."""
+        from PIL import ImageChops
+        image = self.image.convert("RGBA")
+        hole = Image.new("L", image.size, 0)
+        hole.paste(cut.getchannel("A"), box[:2])
+        image.putalpha(ImageChops.subtract(image.getchannel("A"), hole))
+        self.image = image
+        self.changed()
+
+    def needs_alpha_format(self):
+        """True if the image now has transparency but its file type cannot keep it."""
+        from .cutout import has_transparency
+        return has_transparency(self.image) and Path(self.path).suffix.lower() not in (".png", ".webp", ".tif", ".tiff", ".gif")
+
     def crop(self, index, rect):
         x0, y0, x1, y1 = (int(round(value)) for value in rect)
         x0, y0 = max(0, x0), max(0, y0)

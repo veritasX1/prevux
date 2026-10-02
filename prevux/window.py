@@ -410,6 +410,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
                     (_("Rotate Right"), "win.rotate-right", "<Control>r"),
                     (_("Flip Horizontal"), "win.flip-horizontal"),
                     (_("Flip Vertical"), "win.flip-vertical"),
+                    (_("Remove Background"), "win.remove-background", "<Control><Shift>k"),
                 ),
                 section(
                     (_("Highlight Text"), "win.highlight", "<Control><Shift>h"),
@@ -498,6 +499,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
             "flip-vertical": lambda: self.flip(False),
             "highlight": self.highlight_now,
             "crop": self.crop,
+            "remove-background": self.remove_background,
             "adjust-color": self.adjust_color,
             "adjust-size": self.adjust_size,
             "add-text": lambda: self.view.insert_text(),
@@ -548,14 +550,15 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.enable("flip-vertical", image)
         self.enable("adjust-color", image)
         self.enable("adjust-size", image)
-        self.enable("crop", has_doc and self.view.rect_selection is not None)
+        self.enable("crop", has_doc and (self.view.rect_selection is not None or getattr(self.view, "lasso", None) is not None))
         selection = has_doc and (
             self.view.selected is not None or self.view.text_selection is not None
-            or self.view.rect_selection is not None
+            or self.view.rect_selection is not None or getattr(self.view, "lasso", None) is not None
         )
         self.enable("copy", selection)
         self.enable("cut", has_doc and self.view.selected is not None)
-        self.enable("delete", has_doc and self.view.selected is not None)
+        self.enable("delete", has_doc and (self.view.selected is not None or getattr(self.view, "lasso", None) is not None))
+        self.enable("remove-background", image)
         self.enable("previous-document", self.doc_index > 0)
         self.enable("next-document", self.doc_index < len(self.documents) - 1)
 
@@ -1071,6 +1074,10 @@ class PrevuxWindow(Adw.ApplicationWindow):
             self.get_application().clipboard_annotation = view.selected.clone()
             clipboard.set(getattr(view.selected, "text", "") or " ")
             self.get_application().clipboard_marker = clipboard.get_content()
+        elif getattr(view, "lasso", None) and self.doc.kind == "image":
+            # The cut-out object, with a transparent background.
+            from .documents import pil_to_texture
+            clipboard.set(pil_to_texture(view.lasso["cut"]))
         elif view.rect_selection and self.doc.kind == "image":
             _page, x0, y0, x1, y1 = view.rect_selection
             box = tuple(int(round(value)) for value in (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)))
@@ -1098,8 +1105,41 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.new_from_clipboard()
 
     def delete(self):
+        lasso = getattr(self.view, "lasso", None)
+        if lasso is not None and self.doc is not None and self.doc.kind == "image":
+            self.doc.checkpoint(structure=True)
+            self.doc.erase_cutout(lasso["box"], lasso["cut"])
+            self.view.lasso = None
+            self.after_edit(structure=True)
+            self.keep_transparency()
+            return
         self.view.delete_selected()
         self.update_state()
+
+    def remove_background(self):
+        """Preview: Tools → Remove Background (⇧⌘K)."""
+        doc = self.doc
+        if doc is None or doc.kind != "image":
+            return
+        doc.checkpoint(structure=True)
+        doc.remove_background()
+        self.after_edit(structure=True)
+        self.keep_transparency()
+
+    def keep_transparency(self):
+        """JPEG and BMP cannot store transparency: save next to the original as PNG instead."""
+        doc = self.doc
+        if doc is None or not doc.needs_alpha_format():
+            return
+        target = Path(doc.path).with_suffix(".png")
+        number = 2
+        while target.exists():
+            target = Path(doc.path).with_name(f"{Path(doc.path).stem} {number}.png")
+            number += 1
+        doc.path = str(target)
+        doc.format = "PNG"
+        self.update_titles()
+        self.toast(_("Will be saved as PNG – this file type cannot keep transparency. The original stays."))
 
     def select_all(self):
         if self.doc is not None and self.doc.kind == "pdf":
@@ -1136,6 +1176,9 @@ class PrevuxWindow(Adw.ApplicationWindow):
         doc = self.doc
         if doc is None:
             return
+        if getattr(self.view, "lasso", None) is not None and doc.kind == "image":
+            self.crop_lasso()
+            return
         if self.view.rect_selection is None:
             self.toast(_("Select an area with Rectangular Selection first."))
             return
@@ -1144,6 +1187,14 @@ class PrevuxWindow(Adw.ApplicationWindow):
         doc.crop(page, (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)))
         self.view.rect_selection = None
         self.after_edit(structure=True)
+
+    def crop_lasso(self):
+        lasso = self.view.lasso
+        self.doc.checkpoint(structure=True)
+        self.doc.crop_to_cutout(lasso["box"], lasso["cut"])
+        self.view.lasso = None
+        self.after_edit(structure=True)
+        self.keep_transparency()
 
     def insert_blank_page(self):
         doc = self.doc

@@ -100,6 +100,8 @@ class DocumentView(Gtk.Widget):
         self.action = None
         self.pending_anchor = None
         self.scroll_top_pending = False
+        self.lasso = None
+        self.lasso_surface = None
         # Like Preview's View menu: continuous scroll, single page or two pages side by side.
         self.display_mode = "continuous"
         self.last_viewport = (0, 0)
@@ -525,6 +527,15 @@ class DocumentView(Gtk.Widget):
             if highlights:
                 snapshot.push_blend(Gsk.BlendMode.MULTIPLY)
 
+            if texture is not None and self.has_transparency():
+                # Transparent areas show as a checkerboard, as in image editors.
+                tile = 8
+                snapshot.push_repeat(rect, Graphene.Rect().init(x, y, tile * 2, tile * 2))
+                light, shade = (rgba(0.32, 0.32, 0.34), rgba(0.25, 0.25, 0.27)) if dark else (rgba(1, 1, 1), rgba(0.86, 0.86, 0.88))
+                snapshot.append_color(light, Graphene.Rect().init(x, y, tile * 2, tile * 2))
+                snapshot.append_color(shade, Graphene.Rect().init(x, y, tile, tile))
+                snapshot.append_color(shade, Graphene.Rect().init(x + tile, y + tile, tile, tile))
+                snapshot.pop()
             if texture is None:
                 snapshot.append_color(rgba(1, 1, 1), rect)
             else:
@@ -601,6 +612,17 @@ class DocumentView(Gtk.Widget):
             )
             snapshot.pop()
 
+    def has_transparency(self):
+        """Whether the image has transparent pixels (remembered per edit)."""
+        if self.doc is None or self.doc.kind != "image":
+            return False
+        key = (id(self.doc), self.doc.version)
+        if getattr(self, "transparency_key", None) != key:
+            from .cutout import has_transparency
+            self.transparency_key = key
+            self.transparency = has_transparency(self.doc.image)
+        return self.transparency
+
     def is_dark(self):
         color = self.get_color()
         return color.red + color.green + color.blue > 1.5
@@ -644,6 +666,29 @@ class DocumentView(Gtk.Widget):
             for x0, y0, x1, y1 in self.text_selection["rects"]:
                 cr.rectangle(x0, y0, x1 - x0, y1 - y0)
             cr.fill()
+
+        if self.action and self.action.get("type") == "lasso" and self.action["page"] == index:
+            points = self.action["points"]
+            cr.set_source_rgba(accent.red, accent.green, accent.blue, 1)
+            cr.set_line_width(1.5 / self.zoom)
+            cr.set_dash([4 / self.zoom, 3 / self.zoom])
+            cr.move_to(*points[0])
+            for point in points[1:]:
+                cr.line_to(*point)
+            cr.stroke()
+            cr.set_dash([])
+
+        if getattr(self, "lasso", None) and self.lasso["page"] == index:
+            # Dim everything, then show the selected object at full brightness.
+            width, height = self.doc.page_size(index)
+            cr.set_source_rgba(0, 0, 0, 0.35)
+            cr.rectangle(0, 0, width, height)
+            cr.fill()
+            if getattr(self, "lasso_surface", None) is None:
+                from .documents import pil_to_surface
+                self.lasso_surface = pil_to_surface(self.lasso["cut"])
+            cr.set_source_surface(self.lasso_surface[0], *self.lasso["box"][:2])
+            cr.paint()
 
         if self.rect_selection and self.rect_selection[0] == index:
             _page, x0, y0, x1, y1 = self.rect_selection
@@ -947,6 +992,13 @@ class DocumentView(Gtk.Widget):
         self.select(None)
         self.clear_text_selection()
         self.rect_selection = None
+        self.lasso = None
+
+        if self.tool == "lasso-select" and self.doc.kind == "image":
+            px, py = self.clamp_to_page(page, px, py)
+            self.action = {"type": "lasso", "page": page, "points": [(px, py)]}
+            self.queue_draw()
+            return
 
         if self.tool == "redact" and self.doc.kind == "pdf":
             # On text: redact whole words; elsewhere: redact an area.
@@ -1005,6 +1057,13 @@ class DocumentView(Gtk.Widget):
                 stroke.append((px, py))
                 self.queue_draw()
 
+        elif kind == "lasso":
+            px, py = self.clamp_to_page(page, px, py)
+            points = self.action["points"]
+            if math.hypot(px - points[-1][0], py - points[-1][1]) * self.zoom >= 3:
+                points.append((px, py))
+                self.queue_draw()
+
         elif kind == "text":
             self.update_text_selection(page, self.action["start"], (px, py))
 
@@ -1029,6 +1088,15 @@ class DocumentView(Gtk.Widget):
         if kind == "sketch":
             self.recognize_sketch(action["annotation"], action["page"])
             self.notify_modified()
+
+        elif kind == "lasso":
+            # Smart Lasso: the rough outline snaps to the object's edge.
+            from .cutout import lasso_cutout
+            result = lasso_cutout(self.doc.composited(), action["points"]) if len(action["points"]) >= 3 else None
+            self.lasso = None if result is None else {"page": action["page"], "box": result[0], "cut": result[1]}
+            self.lasso_surface = None
+            self.queue_draw()
+            self.emit("selection-changed")
 
         elif kind == "move" and not action["changed"]:
             if isinstance(self.selected, NoteAnnotation):
@@ -1101,6 +1169,8 @@ class DocumentView(Gtk.Widget):
                     name = "crosshair"
                 elif self.tool == "text-select" and self.doc.kind == "pdf":
                     name = "text"
+                elif self.tool == "lasso-select" and self.doc.kind == "image":
+                    name = "crosshair"
                 elif self.tool == "rect-select" or self.doc.kind == "image":
                     name = "crosshair"
         self.set_cursor_from_name(name)
