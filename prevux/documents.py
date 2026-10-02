@@ -1218,6 +1218,33 @@ def foreign_annotation(annot, matrix):
 
 # --- other formats shown as pages --------------------------------------
 
+def duplicate(doc, name):
+    """An untitled copy with all current changes (Preview: File → Duplicate)."""
+    import tempfile
+    folder = Path(tempfile.mkdtemp(prefix="prevux-"))
+    if doc.kind == "image":
+        path = folder / (name + Path(doc.path).suffix.lower())
+        image = doc.image
+        if path.suffix in (".jpg", ".jpeg"):
+            image = image.convert("RGB")
+        image.save(path, **({"dpi": doc.dpi} if doc.dpi else {}))
+        copy = ImageDocument(path)
+        copy.dpi = doc.dpi
+        copy.annotations = [[annotation.clone() for annotation in doc.annotations[0]]]
+    else:
+        path = folder / (name + ".pdf")
+        added = doc.export_annotations()
+        try:
+            data = doc.doc.tobytes(garbage=1, deflate=True)
+        finally:
+            doc.remove_exported(added)
+        path.write_bytes(data)
+        copy = PDFDocument(path)
+    copy.untitled = True
+    copy.modified = True          # closing asks where to keep it
+    return copy
+
+
 class ConvertedDocument(PDFDocument):
     """Markdown, text, HTML, e-books …: laid out as PDF pages for viewing and marking up.
     Saving never writes into the original file – it is exported as a PDF."""
