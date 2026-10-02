@@ -171,3 +171,14 @@ menubutton.narrow-arrow > button {
   outline-offset: 0;
   border-radius: 2px;
 }
+
+/* Slideshow: the picture on black, controls as a floating bar */
+window.slideshow,
+window.slideshow picture {
+  background-color: black;
+}
+
+.slideshow-controls {
+  border-radius: 999px;
+  padding: 6px 12px;
+}

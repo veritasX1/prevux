@@ -397,6 +397,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
                 ),
                 section(
                     (_("Show Markup Toolbar"), "win.markup", "<Control><Shift>a"),
+                    (_("Slideshow"), "win.slideshow", "<Control><Shift>f"),
                     (_("Enter Full Screen"), "win.fullscreen", "F11"),
                 ),
             ),
@@ -501,6 +502,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
             "zoom-out": lambda: self.view.zoom_step(-1),
             "markup": lambda: self.markup_button.set_active(not self.markup_button.get_active()),
             "fullscreen": self.toggle_fullscreen,
+            "slideshow": self.start_slideshow,
             "previous-page": lambda: self.go_page(self.view.current_page - 1),
             "next-page": lambda: self.go_page(self.view.current_page + 1),
             "first-page": lambda: self.go_page(0),
@@ -557,7 +559,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
         for name in (
             "close", "save", "export", "export-pdf", "print", "share", "show-in-files",
             "actual-size", "zoom-fit", "zoom-width", "zoom-in", "zoom-out", "markup", "zoom-selection",
-            "zoom-level", "display-mode", "show-sheet",
+            "zoom-level", "display-mode", "show-sheet", "slideshow",
             "rotate-left", "rotate-right", "inspector", "add-text", "add-shape", "go-to-page",
             "first-page", "last-page", "previous-page", "next-page", "select-all",
             "paste",
@@ -1587,6 +1589,26 @@ class PrevuxWindow(Adw.ApplicationWindow):
             lambda _dialog, response: response == "go" and self.go_page(int(spin.get_value()) - 1),
         )
         dialog.present(self)
+
+    def start_slideshow(self):
+        """All pages of all open documents, starting at the current one (Preview: Slideshow)."""
+        if self.doc is None:
+            return
+        from .slideshow import Slideshow
+        self.view.finish_editing()
+        slides, start = [], 0
+        for doc in self.documents:
+            for page in range(doc.page_count):
+                if doc is self.doc and page == self.view.current_page:
+                    start = len(slides)
+                slides.append((doc, page))
+
+        def finished(doc, page):
+            if doc in self.documents:
+                self.show_document(self.documents.index(doc))
+                self.go_page(page)
+        self.slideshow = Slideshow(self, slides, start, finished)
+        self.slideshow.present()
 
     def toggle_fullscreen(self):
         if self.is_fullscreen():
