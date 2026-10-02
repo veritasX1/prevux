@@ -515,9 +515,12 @@ class InkAnnotation(Annotation):
 
     kind = "ink"
 
-    def __init__(self, strokes=None, style=None):
+    def __init__(self, strokes=None, style=None, widths=None, pressure=False):
         super().__init__(style)
         self.strokes = strokes or []
+        # Draw tool: one width factor per point (pen pressure, or speed for a mouse), else None.
+        self.widths = widths
+        self.pressure = pressure
 
     def bounds(self):
         points = [point for stroke in self.strokes for point in stroke]
@@ -532,6 +535,8 @@ class InkAnnotation(Annotation):
             [function(*point) for point in stroke]
             for stroke in self.strokes
         ]
+        if getattr(self, "widths", None):
+            self.widths = [list(widths) for widths in self.widths]
 
     def path(self, cr):
         for stroke in self.strokes:
@@ -556,12 +561,51 @@ class InkAnnotation(Annotation):
                 cr.line_to(*stroke[-1])
 
     def draw(self, cr):
+        if getattr(self, "widths", None):
+            self.draw_varying(cr)
+            return
         self.draw_shadow(cr, self.path)
         set_color(cr, self.style.stroke or BLACK)
         self.style.apply_line(cr)
         cr.set_line_cap(cairo.LINE_CAP_ROUND)
         self.path(cr)
         cr.stroke()
+
+    TAPER = 5        # points at each end that thin out (mouse strokes have no real pressure)
+
+    def point_widths(self, index):
+        stroke = self.strokes[index]
+        factors = list(self.widths[index]) if index < len(self.widths) else []
+        factors += [1.0] * (len(stroke) - len(factors))
+        if not getattr(self, "pressure", False) and len(stroke) > 2:
+            for i in range(len(stroke)):
+                edge = min(i, len(stroke) - 1 - i)
+                if edge < self.TAPER:
+                    factors[i] *= 0.35 + 0.65 * edge / self.TAPER
+        return [self.style.width * f for f in factors]
+
+    def draw_varying(self, cr):
+        """Line width follows the pen: round segments of changing width, drawn as one
+        layer so a semi-transparent colour does not darken where segments overlap."""
+        color = self.style.stroke or BLACK
+        cr.push_group()
+        cr.set_source_rgba(color[0], color[1], color[2], 1)
+        cr.set_line_cap(cairo.LINE_CAP_ROUND)
+        for index, stroke in enumerate(self.strokes):
+            if not stroke:
+                continue
+            widths = self.point_widths(index)
+            if len(stroke) == 1:
+                cr.arc(stroke[0][0], stroke[0][1], widths[0] / 2, 0, 2 * math.pi)
+                cr.fill()
+                continue
+            for (a, b), (wa, wb) in zip(zip(stroke, stroke[1:]), zip(widths, widths[1:])):
+                cr.set_line_width(max(0.2, (wa + wb) / 2))
+                cr.move_to(*a)
+                cr.line_to(*b)
+                cr.stroke()
+        cr.pop_group_to_source()
+        cr.paint_with_alpha(color[3] if len(color) > 3 else 1)
 
     def hit(self, x, y, tolerance):
         if not super().hit(x, y, tolerance):

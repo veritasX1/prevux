@@ -130,6 +130,7 @@ class MarkupToolbar(Gtk.Box):
             ("lasso-select", "lasso", _("Smart Lasso")),
             ("redact", "redact", _("Redact")),
             ("sketch", "sketch", _("Sketch")),
+            ("draw", "draw", _("Draw")),
             ("note", "note", _("Note")),
         ):
             button = icon_button(icon, tooltip, toggle=True)
