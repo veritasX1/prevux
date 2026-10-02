@@ -214,15 +214,16 @@ class DocumentView(Gtk.Widget):
         size = width if orientation == Gtk.Orientation.HORIZONTAL else height
         return size, size, -1, -1
 
-    def page_rects(self):
+    def page_rects(self, size=None):
+        """Page rectangles in widget coordinates; `size` predicts them for a coming allocation."""
         if self.doc is None:
             return []
-        key = (self.get_width(), self.get_height(), self.zoom, self.doc.page_count, self.doc.version,
+        width, height = size or (self.get_width(), self.get_height())
+        key = (width, height, self.zoom, self.doc.page_count, self.doc.version,
                self.display_mode, self.current_page if self.display_mode == "single" else None)
         if self.layout_cache and self.layout_cache[0] == key:
             return self.layout_cache[1]
 
-        width = self.get_width()
         # Pages not shown (single page mode) get an empty rectangle far away.
         rects = [(-1e6, -1e6, 0.0, 0.0)] * self.doc.page_count
         y = MARGIN
@@ -237,11 +238,12 @@ class DocumentView(Gtk.Widget):
             y += row_height + GAP
 
         total = y - GAP + MARGIN
-        if total < self.get_height():
-            offset = (self.get_height() - total) / 2
+        if total < height:
+            offset = (height - total) / 2
             rects = [(x, y + offset, w, h) if w else (x, y, w, h) for x, y, w, h in rects]
 
-        self.layout_cache = (key, rects)
+        if size is None:
+            self.layout_cache = (key, rects)
         return rects
 
     def on_flip_scroll(self, controller, dx, dy):
@@ -380,18 +382,108 @@ class DocumentView(Gtk.Widget):
                 vadjustment.get_value() + vadjustment.get_page_size() / 2,
             )
         located = self.page_at(*anchor)
+        view_x = anchor[0] - hadjustment.get_value()
+        view_y = anchor[1] - vadjustment.get_value()
+        if located is not None and not self.scroll_top_pending and self.get_width() > 1:
+            # Scroll in the same frame as the zoom: the point under the cursor stays put
+            # instead of jumping there one frame later.
+            self.zoom = zoom
+            self.layout_cache = None
+            self.scroll_to_anchor(located, view_x, view_y)
+            self.queue_resize()
+            self.queue_draw()
+            self.emit("zoom-changed")
+            return
         if located is not None:
-            self.pending_anchor = (
-                located,
-                anchor[0] - hadjustment.get_value(),
-                anchor[1] - vadjustment.get_value(),
-            )
+            self.pending_anchor = (located, view_x, view_y)
 
         self.zoom = zoom
         self.layout_cache = None
         self.queue_resize()
         self.queue_draw()
         self.emit("zoom-changed")
+
+    def scroll_to_anchor(self, located, view_x, view_y):
+        """Set both scroll positions for the new zoom before the next layout."""
+        page, x, y = located
+        view_width, view_height = self.viewport_size()
+        content_width, content_height = self.content_size()
+        width, height = max(view_width, content_width), max(view_height, content_height)
+        rects = self.page_rects((width, height))
+        if page >= len(rects):
+            return
+        px, py, _w, _h = rects[page]
+        for adjustment, upper, page_size, target in (
+            (self.scroller.get_hadjustment(), width, view_width, px + x * self.zoom - view_x),
+            (self.scroller.get_vadjustment(), height, view_height, py + y * self.zoom - view_y),
+        ):
+            value = max(0.0, min(upper - page_size, target))
+            adjustment.configure(value, 0, upper, adjustment.get_step_increment(),
+                                 adjustment.get_page_increment(), page_size)
+
+    # ---- smooth zoom and wheel scrolling -------------------------
+
+    ZOOM_EASE = 18.0        # per second: about 150 ms until a wheel step has settled
+
+    def animate_zoom(self, target, viewport_point):
+        """Glide towards `target`, keeping the document point under `viewport_point` in place."""
+        self.zoom_target = max(MIN_ZOOM, min(MAX_ZOOM, target))
+        self.zoom_point = viewport_point
+        if getattr(self, "zoom_tick", None) is None:
+            self.zoom_last = None
+            self.zoom_tick = self.add_tick_callback(self.zoom_frame)
+
+    def zoom_frame(self, _widget, clock):
+        now = clock.get_frame_time() / 1e6
+        elapsed = 1 / 60 if self.zoom_last is None else min(0.05, now - self.zoom_last)
+        self.zoom_last = now
+        target = self.zoom_target
+        zoom = self.zoom + (target - self.zoom) * (1 - math.exp(-self.ZOOM_EASE * elapsed))
+        done = abs(target - zoom) / target < 0.002
+        if done:
+            zoom = target
+        anchor = None
+        if self.zoom_point is not None:
+            anchor = (self.scroller.get_hadjustment().get_value() + self.zoom_point[0],
+                      self.scroller.get_vadjustment().get_value() + self.zoom_point[1])
+        self.set_zoom(zoom, anchor)
+        if done:
+            self.zoom_tick = None
+            return GLib.SOURCE_REMOVE
+        return GLib.SOURCE_CONTINUE
+
+    def stop_zoom_animation(self):
+        if getattr(self, "zoom_tick", None) is not None:
+            self.remove_tick_callback(self.zoom_tick)
+            self.zoom_tick = None
+
+    SCROLL_EASE = 14.0
+
+    def smooth_scroll(self, adjustment, delta):
+        """Mouse wheel notches glide instead of jumping (touchpads scroll smoothly already)."""
+        animations = self.__dict__.setdefault("scroll_animations", {})
+        current = animations.get(adjustment)
+        start = current["target"] if current else adjustment.get_value()
+        target = max(adjustment.get_lower(), min(adjustment.get_upper() - adjustment.get_page_size(), start + delta))
+        if current:
+            current["target"] = target
+            return
+        state = {"target": target, "last": None}
+        animations[adjustment] = state
+
+        def frame(_widget, clock):
+            now = clock.get_frame_time() / 1e6
+            elapsed = 1 / 60 if state["last"] is None else min(0.05, now - state["last"])
+            state["last"] = now
+            value = adjustment.get_value()
+            step = (state["target"] - value) * (1 - math.exp(-self.SCROLL_EASE * elapsed))
+            if abs(state["target"] - value) < 0.5:
+                adjustment.set_value(state["target"])
+                del animations[adjustment]
+                return GLib.SOURCE_REMOVE
+            adjustment.set_value(value + step)
+            return GLib.SOURCE_CONTINUE
+        self.add_tick_callback(frame)
 
     def apply_anchor(self):
         (page, x, y), view_x, view_y = self.pending_anchor
@@ -412,12 +504,18 @@ class DocumentView(Gtk.Widget):
         return False
 
     def zoom_step(self, direction, anchor=None):
+        # While gliding, the next step starts from where the zoom is heading.
+        current = self.zoom_target if getattr(self, "zoom_tick", None) is not None else self.zoom
         if direction > 0:
-            steps = [step for step in ZOOM_STEPS if step > self.zoom * 1.01]
+            steps = [step for step in ZOOM_STEPS if step > current * 1.01]
             zoom = steps[0] if steps else MAX_ZOOM
         else:
-            steps = [step for step in ZOOM_STEPS if step < self.zoom * 0.99]
+            steps = [step for step in ZOOM_STEPS if step < current * 0.99]
             zoom = steps[-1] if steps else MIN_ZOOM
+        if anchor is None and self.get_mapped():
+            self.fit_mode = None
+            self.animate_zoom(zoom, None)        # buttons and Ctrl+/− glide as well
+            return
         self.set_zoom(zoom, anchor)
 
     def zoom_to_fit(self, mode="page"):
@@ -885,20 +983,48 @@ class DocumentView(Gtk.Widget):
 
     def on_scroll(self, controller, dx, dy):
         state = controller.get_current_event_state()
+        wheel = controller.get_unit() == Gdk.ScrollUnit.WHEEL
         if not state & Gdk.ModifierType.CONTROL_MASK:
-            return False
+            return self.on_wheel(dy) if wheel and not state & Gdk.ModifierType.SHIFT_MASK else False
+        if not dy:
+            return True
         event = controller.get_current_event()
         found, x, y = event.get_position()
-        anchor = None
+        point = None
         if found:
-            point = self.scroller.compute_point(self, Graphene.Point().init(x, y))
-            if point[0]:
-                anchor = (point[1].x, point[1].y)
-        factor = math.pow(1.0015, -dy * 40) if dy else 1
-        self.set_zoom(self.zoom * factor, anchor)
+            # Event position is in the scroller; the zoom keeps that spot under the cursor.
+            point = (x, y)
+        factor = math.pow(1.0015, -dy * 40)
+        if wheel:
+            # Wheel notches add up and glide; touchpad pinch-scroll follows the fingers directly.
+            start = self.zoom_target if getattr(self, "zoom_tick", None) is not None else self.zoom
+            self.fit_mode = None
+            self.animate_zoom(start * factor, point)
+        else:
+            self.stop_zoom_animation()
+            anchor = None
+            if point is not None:
+                anchor = (self.scroller.get_hadjustment().get_value() + x,
+                          self.scroller.get_vadjustment().get_value() + y)
+            self.set_zoom(self.zoom * factor, anchor)
+        return True
+
+    def on_wheel(self, dy):
+        """A mouse wheel notch scrolls as far as GTK would, but glides there."""
+        if self.doc is None or not dy:
+            return False
+        adjustment = self.scroller.get_vadjustment()
+        if self.display_mode == "single":
+            at_top = adjustment.get_value() <= adjustment.get_lower() + 0.5
+            at_bottom = adjustment.get_value() + adjustment.get_page_size() >= adjustment.get_upper() - 0.5
+            if (dy > 0 and at_bottom) or (dy < 0 and at_top):
+                return False     # turning the page is the single-page view's job
+        step = adjustment.get_page_size() ** (2 / 3)      # the distance GTK uses per notch
+        self.smooth_scroll(adjustment, dy * step)
         return True
 
     def on_pinch_begin(self, gesture, sequence):
+        self.stop_zoom_animation()
         self.pinch_start = self.zoom
 
     def on_pinch(self, gesture, scale):
