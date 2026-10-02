@@ -612,6 +612,14 @@ class DocumentView(Gtk.Widget):
             )
             snapshot.pop()
 
+    def word_at(self, page, x, y):
+        """Whether a (recognised) word is under the point – Live Text in images."""
+        slack = 3 / self.zoom
+        for x0, y0, x1, y1, *_rest in self.doc.page_words(page):
+            if x0 - slack <= x <= x1 + slack and y0 - slack <= y <= y1 + slack:
+                return True
+        return False
+
     def has_transparency(self):
         """Whether the image has transparent pixels (remembered per edit)."""
         if self.doc is None or self.doc.kind != "image":
@@ -1013,6 +1021,9 @@ class DocumentView(Gtk.Widget):
                 self.action = {"type": "rect", "page": page, "start": (px, py)}
         elif self.tool == "text-select" and self.doc.kind == "pdf":
             self.action = {"type": "text", "page": page, "start": (px, py)}
+        elif self.doc.kind == "image" and self.tool in ("rect-select", "text-select") and self.word_at(page, px, py):
+            # Live Text: dragging over recognised text selects the text.
+            self.action = {"type": "text", "page": page, "start": (px, py)}
         else:
             px, py = self.clamp_to_page(page, px, py)
             self.action = {"type": "rect", "page": page, "start": (px, py)}
@@ -1168,6 +1179,8 @@ class DocumentView(Gtk.Widget):
                 elif self.tool == "redact":
                     name = "crosshair"
                 elif self.tool == "text-select" and self.doc.kind == "pdf":
+                    name = "text"
+                elif self.doc.kind == "image" and self.tool in ("rect-select", "text-select") and self.word_at(page, px, py):
                     name = "text"
                 elif self.tool == "lasso-select" and self.doc.kind == "image":
                     name = "crosshair"

@@ -97,6 +97,13 @@ cd prevux
 ./install.sh
 ```
 
+Optional, for **Live Text** (select, copy and search text in photos and scanned PDFs –
+recognised on your computer, nothing is uploaded):
+
+```sh
+sudo apt install tesseract-ocr tesseract-ocr-deu
+```
+
 `install.sh` sets up a virtual environment, a `prevux` command in
 `~/.local/bin` and a launcher with icon in the app menu, so Prevux also shows
 up under *Open With* for PDFs and images. To make it the default viewer:
