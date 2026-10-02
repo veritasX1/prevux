@@ -23,7 +23,8 @@
 
 .markup-toolbar button,
 headerbar button {
-  min-width: 30px;
+  min-width: 34px;
+  min-height: 32px;
 }
 
 /* Text editing directly in the document. */
