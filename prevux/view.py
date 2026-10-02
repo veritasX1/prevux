@@ -43,7 +43,7 @@ RESIZE_CURSORS = {
     "ne": "nesw-resize", "sw": "nesw-resize",
     "n": "ns-resize", "s": "ns-resize",
     "w": "ew-resize", "e": "ew-resize",
-    "start": "crosshair", "end": "crosshair", "magnify": "pointer",
+    "start": "crosshair", "end": "crosshair", "magnify": "pointer", "target": "move",
 }
 
 
@@ -496,6 +496,9 @@ class DocumentView(Gtk.Widget):
                 continue
             cx = x + annotation.cx * self.zoom
             cy = y + annotation.cy * self.zoom
+            tx, ty = annotation.target()
+            sx = x + tx * self.zoom        # the magnified spot lands in the lens centre
+            sy = y + ty * self.zoom
             radius = annotation.radius * self.zoom
             factor = annotation.magnification
             circle = Gsk.RoundedRect()
@@ -509,7 +512,7 @@ class DocumentView(Gtk.Widget):
                 texture,
                 Gsk.ScalingFilter.LINEAR,
                 Graphene.Rect().init(
-                    cx + (x - cx) * factor, cy + (y - cy) * factor, w * factor, h * factor,
+                    cx - (sx - x) * factor, cy - (sy - y) * factor, w * factor, h * factor,
                 ),
             )
             snapshot.pop()
@@ -616,10 +619,14 @@ class DocumentView(Gtk.Widget):
             cr.set_line_width(1)
             cr.stroke()
 
-        for _name, hx, hy in self.selected.handles():
+        for name, hx, hy in self.selected.handles():
             wx, wy = self.to_widget(page, hx, hy)
             cr.arc(wx, wy, HANDLE, 0, 2 * math.pi)
-            cr.set_source_rgb(1, 1, 1)
+            # The loupe's target is filled with the accent colour: drag it to choose what is magnified.
+            if name == "target":
+                cr.set_source_rgba(accent.red, accent.green, accent.blue, 1)
+            else:
+                cr.set_source_rgb(1, 1, 1)
             cr.fill_preserve()
             cr.set_source_rgba(accent.red, accent.green, accent.blue, 1)
             cr.set_line_width(1.5)
@@ -1054,6 +1061,11 @@ class DocumentView(Gtk.Widget):
         visible = min(self.viewport_size()) / self.zoom
         size = min(min(width, height) * 0.18, visible * 0.5)
         shape = new_shape(kind, (x, y), size, self.defaults.shape_style())
+        if kind == "loupe":
+            # The lens sits up and to the right of the spot it magnifies, so nothing is covered.
+            r = shape.radius
+            shape.cx = max(r, min(width - r, x + r * 1.6))
+            shape.cy = max(r, min(height - r, y - r * 1.6))
         self.insert(shape, page)
 
     def insert_text(self):
