@@ -15,6 +15,7 @@ from PIL import Image, ImageOps
 
 import pymupdf
 
+from . import settings
 from .model import (
     Annotation,
     LoupeAnnotation,
@@ -706,6 +707,12 @@ class PDFDocument(BaseDocument):
                     continue
                 if annot is None:
                     continue
+                author = settings.get("author")
+                if author:
+                    # Shown as the author of notes and markup in other PDF readers too.
+                    info = annot.info
+                    info["title"] = author
+                    annot.set_info(info)
                 self.doc.xref_set_key(
                     annot.xref, PREVUX_KEY,
                     pymupdf.get_pdf_str(json.dumps(annotation.to_dict())),

@@ -19,6 +19,7 @@ ACCELERATORS = {
     "app.new-window": ["<Control><Alt>n"],
     "app.quit": ["<Control>q"],
     "app.shortcuts": ["<Control>question"],
+    "app.preferences": ["<Control>comma"],
     "win.new-from-clipboard": ["<Control>n"],
     "win.open": ["<Control>o"],
     "win.close": ["<Control>w"],
@@ -80,11 +81,15 @@ class PrevuxApplication(Adw.Application):
             Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
         )
 
+        from . import settings
+        settings.apply_background()
+
         for name, callback in (
             ("new-window", lambda: self.new_window().present()),
             ("quit", self.quit_all),
             ("about", self.show_about),
             ("shortcuts", self.show_shortcuts),
+            ("preferences", self.show_preferences),
         ):
             action = Gio.SimpleAction.new(name, None)
             action.connect("activate", lambda _action, _param, function=callback: function())
@@ -119,6 +124,15 @@ class PrevuxApplication(Adw.Application):
     def quit_all(self):
         for window in list(self.get_windows()):
             window.close()
+
+    def show_preferences(self):
+        from .settings import PreferencesDialog
+
+        def changed():
+            for window in self.get_windows():
+                if hasattr(window, "settings_changed"):
+                    window.settings_changed()
+        PreferencesDialog(changed).present(self.get_active_window())
 
     def show_about(self):
         about = Adw.AboutDialog(

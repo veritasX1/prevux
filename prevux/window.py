@@ -22,6 +22,7 @@ from .documents import (
     pil_to_surface,
     open_document,
 )
+from . import settings
 from .i18n import _
 from .icons import Icon, Swatch, icon_button, icon_menu_button
 from .markup import MarkupDefaults, MarkupToolbar, popover_box
@@ -436,6 +437,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
         menu.append_section(
             None,
             section(
+                (_("Settings…"), "app.preferences", "<Control>comma"),
                 (_("Keyboard Shortcuts"), "app.shortcuts"),
                 (_("About Prevux"), "app.about"),
             ),
@@ -475,7 +477,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
             "show-sheet": lambda: self.show_sidebar_mode("sheet"),
             "zoom-selection": self.zoom_to_selection,
             "zoom-level": self.ask_zoom_level,
-            "actual-size": lambda: self.view.set_zoom(1.0),
+            "actual-size": lambda: self.view.set_zoom(settings.actual_size_zoom(self, self.doc)),
             "zoom-fit": lambda: self.view.zoom_to_fit("page"),
             "zoom-width": lambda: self.view.zoom_to_fit("width"),
             "zoom-in": lambda: self.view.zoom_step(1),
@@ -744,6 +746,23 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.sidebar.select_page(index, 0)
         if self.sidebar.mode == "contents":
             self.sidebar.fill_contents(doc)
+        self.apply_opening_settings(doc)
+        self.update_state()
+
+    def apply_opening_settings(self, doc):
+        """Preview's PDF settings: view mode for first opening, continue at the last page."""
+        if doc is None or getattr(doc, "settings_applied", False):
+            return
+        doc.settings_applied = True
+        if doc.kind != "pdf":
+            return
+        mode = settings.get("pdf_view")
+        self.activate_action("win.display-mode", GLib.Variant.new_string(mode))
+        page = settings.last_page(doc.path) if settings.get("reopen_last_page") else None
+        if page and 0 < page < doc.page_count:
+            GLib.timeout_add(250, lambda: self.go_page(page) and False)
+
+    def settings_changed(self):
         self.update_state()
 
     def ask_password(self, path):
@@ -1282,6 +1301,11 @@ class PrevuxWindow(Adw.ApplicationWindow):
         dialog.connect("response", lambda _d, response: response == "ok" and self.view.set_zoom(spin.get_value() / 100))
         dialog.present(self)
 
+    def remember_page(self, path, page):
+        self.page_memory_source = None
+        settings.remember_page(path, page)
+        return False
+
     def go_page(self, page):
         doc = self.doc
         if doc is None:
@@ -1290,6 +1314,12 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.view.scroll_to_page(page)
 
     def on_view_page_changed(self, view, page):
+        doc = self.doc
+        if doc is not None and doc.kind == "pdf" and not getattr(doc, "untitled", False):
+            # Remember where you are, a moment after the page stops changing.
+            if getattr(self, "page_memory_source", None):
+                GLib.source_remove(self.page_memory_source)
+            self.page_memory_source = GLib.timeout_add(800, self.remember_page, doc.path, page)
         self.sidebar.select_page(self.doc_index, page)
         self.update_titles()
 
