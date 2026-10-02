@@ -82,6 +82,16 @@ def set_bookmarks(path, items):
     put("bookmarks", marks)
 
 
+def path_moved(old, new):
+    """A document was renamed or moved: its last page and bookmarks go along."""
+    data = _load()
+    for key in ("last_pages", "bookmarks"):
+        entries = dict(data.get(key) or {})
+        if str(old) in entries:
+            entries[str(new)] = entries.pop(str(old))
+            put(key, entries)
+
+
 def apply_background():
     """The colour behind the pages (Preview: Settings → General → Window background)."""
     global _provider

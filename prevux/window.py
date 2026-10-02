@@ -1,6 +1,7 @@
 """The Prevux document window."""
 
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -19,10 +20,11 @@ from .documents import (
     TEXT_EXTENSIONS,
     ImageDocument,
     PDFDocument,
+    duplicate,
     pil_to_surface,
     open_document,
 )
-from . import settings
+from . import settings, versions
 from .i18n import _, decimal
 from .icons import Icon, Swatch, icon_button, icon_menu_button
 from .markup import MarkupDefaults, MarkupToolbar, popover_box
@@ -370,6 +372,10 @@ class PrevuxWindow(Adw.ApplicationWindow):
                 section(
                     (_("Close"), "win.close", "<Control>w"),
                     (_("Save"), "win.save", "<Control>s"),
+                    (_("Duplicate"), "win.duplicate", "<Control><Shift>d"),
+                    (_("Rename…"), "win.rename"),
+                    (_("Move To…"), "win.move-to"),
+                    (_("Revert To…"), "win.revert"),
                     (_("Export…"), "win.export", "<Control><Shift>s"),
                     (_("Export as PDF…"), "win.export-pdf"),
                     (_("Export with Filter…"), "win.export-filtered"),
@@ -543,6 +549,10 @@ class PrevuxWindow(Adw.ApplicationWindow):
             "markup": lambda: self.markup_button.set_active(not self.markup_button.get_active()),
             "fullscreen": self.toggle_fullscreen,
             "slideshow": self.start_slideshow,
+            "duplicate": self.duplicate_document,
+            "rename": self.rename_document,
+            "move-to": self.move_document,
+            "revert": self.show_versions,
             "customize-toolbar": lambda: self.get_application().show_preferences("toolbar"),
             "next-tab": lambda: self.cycle_tab(1),
             "previous-tab": lambda: self.cycle_tab(-1),
@@ -614,6 +624,11 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.enable("undo", has_doc and doc.can_undo())
         self.enable("redo", has_doc and doc.can_redo())
         self.enable("find", pdf)
+        on_disk = has_doc and not getattr(doc, "untitled", False) and not getattr(doc, "converted", False)
+        self.enable("duplicate", has_doc)
+        self.enable("rename", on_disk)
+        self.enable("move-to", on_disk)
+        self.enable("revert", on_disk)
         several = len(self.documents) > 1
         for name in ("next-tab", "previous-tab", "move-tab-to-window"):
             self.enable(name, several)
@@ -1100,6 +1115,155 @@ class PrevuxWindow(Adw.ApplicationWindow):
         target.present()
 
     # ========================================================
+    # DUPLICATE, RENAME, MOVE, REVERT
+    # ========================================================
+
+    def duplicate_document(self):
+        doc = self.doc
+        if doc is None:
+            return
+        self.view.finish_editing()
+        try:
+            copy = duplicate(doc, _("{name} copy").format(name=Path(doc.name).stem))
+        except Exception as error:
+            self.show_error(_("The document could not be duplicated."), str(error))
+            return
+        window = self.get_application().new_window()
+        window.present()
+        window.add_documents([copy])
+
+    def relocate(self, doc, target):
+        """Rename or move the file on disk; everything that knows its path follows."""
+        old = Path(doc.path)
+        target = Path(target)
+        if target.exists():
+            self.show_error(_("“{name}” already exists there.").format(name=target.name))
+            return False
+        try:
+            shutil.move(str(old), str(target))
+        except OSError as error:
+            self.show_error(_("The document could not be moved."), str(error))
+            return False
+        doc.path = str(target)
+        settings.path_moved(old, target)
+        versions.moved(old, target)
+        self.get_application().note_recent(doc.path)
+        self.sidebar.set_documents(self.documents)
+        self.sidebar.select_page(self.doc_index, self.view.current_page)
+        self.update_titles()
+        self.update_state()
+        return True
+
+    def rename_document(self):
+        doc = self.doc
+        if doc is None:
+            return
+        old = Path(doc.path)
+        dialog = Adw.AlertDialog(heading=_("Rename"), body=_("The file keeps its place, only the name changes."))
+        entry = Gtk.Entry(text=old.stem, activates_default=True)
+        dialog.set_extra_child(entry)
+        dialog.add_response("cancel", _("Cancel"))
+        dialog.add_response("rename", _("Rename"))
+        dialog.set_response_appearance("rename", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("rename")
+        dialog.set_close_response("cancel")
+        entry.connect("changed", lambda e: dialog.set_response_enabled(
+            "rename", bool(e.get_text().strip()) and "/" not in e.get_text()))
+
+        def answered(_dialog, response):
+            name = entry.get_text().strip()
+            if response != "rename" or not name or name in (old.stem, old.name):
+                return
+            if not Path(name).suffix or Path(name).suffix.lower() != old.suffix.lower():
+                name += old.suffix               # the type stays, like Finder keeps it
+            if self.relocate(doc, old.with_name(name)):
+                self.toast(_("Renamed to “{name}”").format(name=name))
+        dialog.connect("response", answered)
+        dialog.present(self)
+        entry.grab_focus()
+        entry.select_region(0, -1)
+
+    def move_document(self):
+        doc = self.doc
+        if doc is None:
+            return
+        dialog = Gtk.FileDialog(title=_("Move To"), accept_label=_("Move"))
+        dialog.set_initial_folder(Gio.File.new_for_path(str(Path(doc.path).parent)))
+
+        def chosen(dialog, result):
+            try:
+                folder = dialog.select_folder_finish(result)
+            except GLib.Error:
+                return
+            if folder is None or Path(folder.get_path()) == Path(doc.path).parent:
+                return
+            if self.relocate(doc, Path(folder.get_path()) / Path(doc.path).name):
+                self.toast(_("Moved to “{folder}”").format(folder=Path(folder.get_path()).name))
+        dialog.select_folder(self, None, chosen)
+
+    def show_versions(self):
+        """Revert To: the saved file, or one of the versions Prevux kept before saving."""
+        doc = self.doc
+        if doc is None:
+            return
+        self.view.finish_editing()
+        choices = []
+        if doc.modified:
+            choices.append((Path(doc.path), Path(doc.path).stat().st_mtime, _("Last Saved"), False))
+        for path, moment, _size in versions.versions(doc.path):
+            choices.append((path, moment, None, True))
+
+        dialog = Adw.Dialog(title=_("Revert To"), content_width=420, content_height=520)
+        view = Adw.ToolbarView()
+        view.add_top_bar(Adw.HeaderBar())
+        if not choices:
+            view.set_content(Adw.StatusPage(
+                icon_name="document-open-recent-symbolic", title=_("No Earlier Versions"),
+                description=_("Each time you save, Prevux keeps the previous state here.")))
+        else:
+            group = Adw.PreferencesGroup(description=_("Restoring opens that state; save to keep it."))
+            for path, moment, title, is_version in choices:
+                when = GLib.DateTime.new_from_unix_local(int(moment)).format("%d.%m.%Y, %H:%M")
+                row = Adw.ActionRow(title=title or when, subtitle=when if title else human_size(path.stat().st_size))
+                try:
+                    texture = open_document(str(path)).thumbnail(0, 64)
+                    picture = Gtk.Picture(paintable=texture, can_shrink=True, content_fit=Gtk.ContentFit.CONTAIN)
+                    picture.set_size_request(48, 48)
+                    picture.add_css_class("thumbnail")
+                    row.add_prefix(picture)
+                except Exception:
+                    pass
+                button = Gtk.Button(label=_("Restore"), valign=Gtk.Align.CENTER)
+                button.connect("clicked", lambda _b, path=path, is_version=is_version:
+                               (dialog.close(), self.restore_version(doc, path, is_version)))
+                row.add_suffix(button)
+                group.add(row)
+            page = Adw.PreferencesPage()
+            page.add(group)
+            view.set_content(page)
+        dialog.set_child(view)
+        dialog.present(self)
+
+    def restore_version(self, doc, path, is_version):
+        if doc not in self.documents:
+            return
+        try:
+            restored = open_document(str(path))
+        except Exception as error:
+            self.show_error(_("This version could not be opened."), str(error))
+            return
+        restored.path = doc.path
+        restored.modified = is_version          # the saved state is already on disk
+        restored.settings_applied = True
+        index = self.documents.index(doc)
+        self.documents[index] = restored
+        self.doc_index = -1
+        self.sidebar.set_documents(self.documents)
+        self.show_document(index)
+        self.update_titles()
+        self.toast(_("Version restored – save to keep it") if is_version else _("Reverted to the last saved state"))
+
+    # ========================================================
     # SAVING
     # ========================================================
 
@@ -1115,6 +1279,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
             self.export_dialog(pdf=True, then=then)
             return
         try:
+            versions.keep(doc.path)          # the state before this save stays restorable
             doc.save()
         except Exception as error:
             self.show_error(_("The document could not be saved."), str(error))
