@@ -20,7 +20,13 @@ DEFAULTS = {
     "reopen_last_page": True,
     "pdf_view": "continuous",      # continuous, single, two
     "author": "",                  # name written into notes and markup
+    "open_in_tabs": False,         # files opened from outside join the window as tabs
+    "toolbar_hidden": [],          # toolbar items switched off (View → Customize Toolbar)
 }
+TOOLBAR_ITEMS = [                  # (key, label) in the order they appear, left to right
+    ("info", "Inspector"), ("zoom", "Zoom"), ("share", "Share"), ("highlight", "Highlight"),
+    ("rotate", "Rotate"), ("markup", "Markup"), ("search", "Search"),
+]
 LAST_PAGES_KEEP = 300
 
 _data = None
@@ -134,12 +140,36 @@ class PreferencesDialog(Adw.PreferencesDialog):
         row.add_suffix(reset)
         group.add(row)
         page.add(group)
+        group = Adw.PreferencesGroup(title=_("Windows"))
+        tabs = Adw.SwitchRow(title=_("Open documents in tabs"),
+                             subtitle=_("Files you open join the front window as a tab"),
+                             active=get("open_in_tabs"))
+        tabs.connect("notify::active", lambda r, _p: self.set("open_in_tabs", r.get_active()))
+        group.add(tabs)
+        page.add(group)
         group = Adw.PreferencesGroup(title=_("Notes and Markup"))
         author = Adw.EntryRow(title=_("Your name in notes and markup"), text=get("author"))
         author.connect("changed", lambda e: self.set("author", e.get_text().strip()))
         group.add(author)
         page.add(group)
         self.add(page)
+
+        page = Adw.PreferencesPage(title=_("Toolbar"), icon_name="view-more-horizontal-symbolic", name="toolbar")
+        group = Adw.PreferencesGroup(title=_("Show in the toolbar"),
+                                     description=_("Hidden items stay in the menu and keep their shortcuts."))
+        self.toolbar_rows = {}
+        for key, label in TOOLBAR_ITEMS:
+            row = Adw.SwitchRow(title=_(label), active=key not in (get("toolbar_hidden") or []))
+            row.connect("notify::active", self.on_toolbar_item, key)
+            self.toolbar_rows[key] = row
+            group.add(row)
+        page.add(group)
+        group = Adw.PreferencesGroup()
+        reset = Adw.ButtonRow(title=_("Restore Default Toolbar"))
+        reset.connect("activated", self.on_toolbar_reset)
+        group.add(reset)
+        page.add(group)
+        self.toolbar_page = page
 
         page = Adw.PreferencesPage(title=_("Images"), icon_name="image-x-generic-symbolic")
         group = Adw.PreferencesGroup(title=_("Define 100% scale as"))
@@ -162,6 +192,18 @@ class PreferencesDialog(Adw.PreferencesDialog):
                                            ("two", _("Two Pages"))], _("When opening for the first time")))
         page.add(group)
         self.add(page)
+        self.add(self.toolbar_page)
+
+    def on_toolbar_item(self, row, _param, key):
+        hidden = [item for item in (get("toolbar_hidden") or []) if item != key]
+        if not row.get_active():
+            hidden.append(key)
+        self.set("toolbar_hidden", hidden)
+
+    def on_toolbar_reset(self, _row):
+        for row in self.toolbar_rows.values():
+            row.set_active(True)
+        self.set("toolbar_hidden", [])
 
     @staticmethod
     def background_rgba():

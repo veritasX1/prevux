@@ -219,6 +219,22 @@ class PrevuxWindow(Adw.ApplicationWindow):
         info = icon_menu_button("info", _("Inspector"), self.info_popover)
         end_items.append(info)
 
+        # View → Customize Toolbar: each optional item sits in its own box that the setting
+        # shows or hides (the breakpoints below hide the inner widgets when space runs out).
+        self.toolbar_items = {}
+        for key, widget in (("search", self.search_slot), ("markup", self.markup_button),
+                            ("rotate", rotate), ("highlight", highlight_slot), ("share", share),
+                            ("zoom", zoom_box), ("info", info)):
+            holder = Gtk.Box()
+            holder.append(widget)
+            self.toolbar_items[key] = holder
+            end_items[end_items.index(widget)] = holder
+        # The compact search button belongs to "search" as well.
+        compact_holder = Gtk.Box()
+        compact_holder.append(self.compact_search_slot)
+        end_items[end_items.index(self.compact_search_slot)] = compact_holder
+        self.toolbar_items["search-compact"] = compact_holder
+
         # One row for title and items: the title shrinks with an ellipsis
         # instead of sliding under the buttons.
         bar = Gtk.Box(spacing=6, hexpand=True)
@@ -228,6 +244,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
         for widget in reversed(end_items):
             bar.append(widget)
         header.set_title_widget(bar)
+        self.apply_toolbar_settings()
 
         content_view.add_top_bar(header)
 
@@ -247,6 +264,18 @@ class PrevuxWindow(Adw.ApplicationWindow):
                 breakpoint.add_setter(widget, "visible", False)
             breakpoint.add_setter(self.compact_search_slot, "visible", True)
             self.content_bin.add_breakpoint(breakpoint)
+
+        # Documents as tabs (Preview: window tabs). The pages only carry the titles;
+        # the document area below is shared and shows the selected tab's document.
+        self.tab_view = Adw.TabView()
+        self.tab_pages = []
+        self.syncing_tabs = False
+        self.tab_view.connect("notify::selected-page", self.on_tab_selected)
+        self.tab_view.connect("close-page", self.on_tab_close)
+        self.tab_view.connect("page-reordered", self.on_tab_reordered)
+        self.tab_view.connect("create-window", self.on_tab_create_window)
+        self.tab_bar = Adw.TabBar(view=self.tab_view, autohide=True)
+        content_view.add_top_bar(self.tab_bar)
 
         self.markup = MarkupToolbar(self)
         markup_scroller = Gtk.ScrolledWindow(child=self.markup)
@@ -397,6 +426,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
                 ),
                 section(
                     (_("Show Markup Toolbar"), "win.markup", "<Control><Shift>a"),
+                    (_("Customize Toolbar…"), "win.customize-toolbar"),
                     (_("Slideshow"), "win.slideshow", "<Control><Shift>f"),
                     (_("Enter Full Screen"), "win.fullscreen", "F11"),
                 ),
@@ -446,6 +476,16 @@ class PrevuxWindow(Adw.ApplicationWindow):
             ),
         ]
 
+        menus.append(submenu(
+            _("Window"),
+            section(
+                (_("Show Previous Tab"), "win.previous-tab", "<Control><Shift>Tab"),
+                (_("Show Next Tab"), "win.next-tab", "<Control>Tab"),
+                (_("Move Tab to New Window"), "win.move-tab-to-window"),
+                (_("Merge All Windows"), "win.merge-windows"),
+            ),
+        ))
+
         menu = Gio.Menu()
         top = Gio.Menu()
         for label, submenu_model in menus:
@@ -470,7 +510,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
         simple = {
             "open": self.open_dialog,
             "new-from-clipboard": self.new_from_clipboard,
-            "close": self.close,
+            "close": self.close_tab_or_window,
             "save": self.save,
             "export": self.export_dialog,
             "export-pdf": lambda: self.export_dialog(pdf=True),
@@ -503,6 +543,11 @@ class PrevuxWindow(Adw.ApplicationWindow):
             "markup": lambda: self.markup_button.set_active(not self.markup_button.get_active()),
             "fullscreen": self.toggle_fullscreen,
             "slideshow": self.start_slideshow,
+            "customize-toolbar": lambda: self.get_application().show_preferences("toolbar"),
+            "next-tab": lambda: self.cycle_tab(1),
+            "previous-tab": lambda: self.cycle_tab(-1),
+            "move-tab-to-window": self.move_tab_to_window,
+            "merge-windows": self.merge_windows,
             "previous-page": lambda: self.go_page(self.view.current_page - 1),
             "next-page": lambda: self.go_page(self.view.current_page + 1),
             "first-page": lambda: self.go_page(0),
@@ -569,6 +614,12 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.enable("undo", has_doc and doc.can_undo())
         self.enable("redo", has_doc and doc.can_redo())
         self.enable("find", pdf)
+        several = len(self.documents) > 1
+        for name in ("next-tab", "previous-tab", "move-tab-to-window"):
+            self.enable(name, several)
+        self.enable("merge-windows", any(
+            isinstance(window, PrevuxWindow) and window is not self
+            for window in self.get_application().get_windows()))
         bookmarkable = pdf and not getattr(doc, "untitled", False) and doc.path is not None
         self.enable("bookmark", bookmarkable)
         self.enable("show-bookmarks", bookmarkable)
@@ -632,6 +683,8 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.subtitle_label.set_text(subtitle)
         self.subtitle_label.set_visible(True)
 
+        if getattr(self, "tab_pages", None) is not None and len(self.tab_pages) == len(self.documents):
+            self.sync_tabs()          # titles and "edited" dots of the tabs
     def toast(self, text):
         toast = Adw.Toast(title=text)
         toast.set_timeout(2)
@@ -746,6 +799,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
     def add_documents(self, documents):
         self.documents.extend(documents)
         self.sidebar.set_documents(self.documents)
+        self.sync_tabs()
         self.show_document(len(self.documents) - len(documents))
         if len(self.documents) > 1 or documents[0].page_count > 1:
             self.show_sidebar_when_ready()
@@ -784,7 +838,139 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.apply_opening_settings(doc)
         self.start_live_text(doc)
         self.refresh_bookmarks()
+        self.select_tab(index)
         self.update_state()
+
+    # ========================================================
+    # TABS
+    # ========================================================
+
+    def sync_tabs(self):
+        """One tab page per document, titles up to date, the current one selected."""
+        self.syncing_tabs = True
+        while len(self.tab_pages) > len(self.documents):
+            page = self.tab_pages.pop()
+            self.tab_view.close_page(page)
+        while len(self.tab_pages) < len(self.documents):
+            self.tab_pages.append(self.tab_view.append(Gtk.Box()))
+        for doc, page in zip(self.documents, self.tab_pages):
+            page.set_title(doc.name)
+            page.set_tooltip(str(doc.path) if doc.path else doc.name)
+            page.set_indicator_icon(Gio.ThemedIcon.new("media-record-symbolic") if doc.modified else None)
+            page.set_indicator_tooltip(_("Edited") if doc.modified else "")
+        self.syncing_tabs = False
+        self.select_tab(self.doc_index)
+
+    def select_tab(self, index):
+        if 0 <= index < len(self.tab_pages) and self.tab_view.get_selected_page() is not self.tab_pages[index]:
+            self.syncing_tabs = True
+            self.tab_view.set_selected_page(self.tab_pages[index])
+            self.syncing_tabs = False
+
+    def on_tab_selected(self, view, _param):
+        page = view.get_selected_page()
+        if not self.syncing_tabs and page in self.tab_pages:
+            self.show_document(self.tab_pages.index(page))
+
+    def on_tab_close(self, view, page):
+        if self.syncing_tabs:
+            view.close_page_finish(page, True)
+            return True
+        view.close_page_finish(page, False)       # we remove it ourselves, after asking
+        if page in self.tab_pages:
+            self.close_document(self.tab_pages.index(page))
+        return True
+
+    def on_tab_reordered(self, view, page, position):
+        old = self.tab_pages.index(page)
+        current = self.doc
+        self.tab_pages.insert(position, self.tab_pages.pop(old))
+        self.documents.insert(position, self.documents.pop(old))
+        self.doc_index = self.documents.index(current)
+        self.sidebar.set_documents(self.documents)
+        self.sidebar.select_page(self.doc_index, self.view.current_page)
+
+    def on_tab_create_window(self, _view):
+        return None          # tabs are moved with "Move Tab to New Window"
+
+    def cycle_tab(self, delta):
+        if len(self.documents) > 1:
+            self.show_document((self.doc_index + delta) % len(self.documents))
+
+    def close_tab_or_window(self):
+        if len(self.documents) > 1:
+            self.close_document(self.doc_index)
+        else:
+            self.close()
+
+    def close_document(self, index):
+        """Close one document of the window (Preview: close a tab), asking about changes."""
+        doc = self.documents[index]
+        self.show_document(index)
+        self.view.finish_editing()
+        if not doc.modified:
+            self.remove_document(index)
+            return
+        dialog = Adw.AlertDialog(
+            heading=_("Do you want to keep the changes you made to “{name}”?").format(name=doc.name),
+            body=_("Your changes will be lost if you don’t save them."),
+        )
+        dialog.add_response("discard", _("Don’t Save"))
+        dialog.add_response("cancel", _("Cancel"))
+        dialog.add_response("save", _("Save"))
+        dialog.set_response_appearance("discard", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("save")
+        dialog.set_close_response("cancel")
+
+        def answered(_dialog, response):
+            if response == "discard":
+                self.remove_document(self.documents.index(doc))
+            elif response == "save":
+                self.save(then=lambda: doc in self.documents and self.remove_document(self.documents.index(doc)))
+        dialog.connect("response", answered)
+        dialog.present(self)
+
+    def remove_document(self, index):
+        """Take a document out of this window (closed, or moved to another window)."""
+        self.view.finish_editing()
+        doc = self.documents.pop(index)
+        if not self.documents:
+            self.force_close = True
+            self.close()
+            return doc
+        self.doc_index = -1
+        self.sidebar.set_documents(self.documents)
+        self.sync_tabs()
+        self.show_document(min(index, len(self.documents) - 1))
+        return doc
+
+    def move_tab_to_window(self):
+        if len(self.documents) < 2:
+            return
+        doc = self.remove_document(self.doc_index)
+        window = self.get_application().new_window()
+        window.present()
+        window.add_documents([doc])
+
+    def merge_windows(self):
+        """Window → Merge All Windows: every other Prevux window becomes tabs here."""
+        for window in list(self.get_application().get_windows()):
+            if window is self or not isinstance(window, PrevuxWindow) or not window.documents:
+                continue
+            window.view.finish_editing()
+            documents, window.documents = window.documents, []
+            window.force_close = True
+            window.close()
+            for doc in documents:
+                doc.settings_applied = True       # keep where it was, no reopening rules
+            self.add_documents(documents)
+        self.present()
+
+    def apply_toolbar_settings(self):
+        hidden = set(settings.get("toolbar_hidden") or [])
+        for key, holder in self.toolbar_items.items():
+            holder.set_visible(key.split("-")[0] not in hidden)
 
     def start_live_text(self, doc):
         """Recognise text in images and scanned pages in the background (Live Text)."""
@@ -837,6 +1023,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
             GLib.timeout_add(250, lambda: self.go_page(page) and False)
 
     def settings_changed(self):
+        self.apply_toolbar_settings()
         self.update_state()
 
     def ask_password(self, path):
