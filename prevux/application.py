@@ -34,6 +34,8 @@ ACCELERATORS = {
     "win.show-bookmarks": ["<Control><Alt>5"],
     "win.bookmark": ["<Control>d"],
     "win.slideshow": ["<Control><Shift>f"],
+    "win.next-tab": ["<Control>Tab", "<Control>Page_Down"],
+    "win.previous-tab": ["<Control><Shift>Tab", "<Control><Shift>ISO_Left_Tab", "<Control>Page_Up"],
     "win.display-mode::continuous": ["<Control>1"],
     "win.display-mode::single": ["<Control>2"],
     "win.display-mode::two": ["<Control>3"],
@@ -108,6 +110,12 @@ class PrevuxApplication(Adw.Application):
 
     def do_open(self, files, n_files, hint):
         paths = [file.get_path() for file in files if file.get_path()]
+        from . import settings
+        window = self.get_active_window()
+        if settings.get("open_in_tabs") and window is not None and getattr(window, "documents", None):
+            window.present()
+            window.load_paths(paths)          # as new tabs of the open window
+            return
         self.open_paths(paths)
 
     def new_window(self):
@@ -129,14 +137,17 @@ class PrevuxApplication(Adw.Application):
         for window in list(self.get_windows()):
             window.close()
 
-    def show_preferences(self):
+    def show_preferences(self, page=None):
         from .settings import PreferencesDialog
 
         def changed():
             for window in self.get_windows():
                 if hasattr(window, "settings_changed"):
                     window.settings_changed()
-        PreferencesDialog(changed).present(self.get_active_window())
+        dialog = PreferencesDialog(changed)
+        if page:
+            dialog.set_visible_page_name(page)
+        dialog.present(self.get_active_window())
 
     def show_about(self):
         about = Adw.AboutDialog(

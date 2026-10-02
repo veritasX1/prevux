@@ -43,6 +43,8 @@ SECTIONS = [
         ("Previous Page", "<Alt>Up"),
         ("Next Page", "<Alt>Down"),
         ("Go to Page…", "<Control><Alt>g"),
+        ("Show Next Tab", "<Control>Tab"),
+        ("Show Previous Tab", "<Control><Shift>Tab"),
         ("Previous Document", "<Alt>Page_Up"),
         ("Next Document", "<Alt>Page_Down"),
     ]),
