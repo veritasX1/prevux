@@ -1049,7 +1049,10 @@ class DocumentView(Gtk.Widget):
             return
         page, x, y = self.insertion_point()
         width, height = self.doc.page_size(page)
-        size = min(width, height, self.viewport_size()[1] / self.zoom) * 0.18
+        # Like Preview: sized to the document, not to the zoom – but never larger than half of
+        # what is visible, so it stays usable when zoomed in.
+        visible = min(self.viewport_size()) / self.zoom
+        size = min(min(width, height) * 0.18, visible * 0.5)
         shape = new_shape(kind, (x, y), size, self.defaults.shape_style())
         self.insert(shape, page)
 

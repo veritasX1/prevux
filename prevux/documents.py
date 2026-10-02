@@ -387,11 +387,19 @@ class PDFDocument(BaseDocument):
         rect = self.doc[index].rect
         return (rect.width, rect.height)
 
+    def _short_side(self):
+        """Shorter edge of the first page in points (A4: 595)."""
+        try:
+            return min(self.page_size(0)) if len(self.doc) else 595.0
+        except Exception:
+            return 595.0
+
     def default_text_size(self):
-        return 14.0
+        # A4 and smaller: 14 pt; larger formats (A3, posters, scans) grow along.
+        return max(14.0, self._short_side() / 42)
 
     def default_line_width(self):
-        return 2.0
+        return max(2.0, self._short_side() / 300)
 
     # --- rendering --------------------------------------------
 
