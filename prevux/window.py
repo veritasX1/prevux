@@ -684,7 +684,11 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.title_label.set_text(title)
         self.set_title(title)
 
-        if doc.kind == "pdf":
+        if getattr(doc, "frame_durations", None):
+            index = min(self.view.current_page, len(doc.frame_durations) - 1)
+            subtitle = _("Frame {page} of {count} · {seconds} s").format(
+                page=index + 1, count=doc.page_count, seconds=decimal(doc.frame_durations[index] / 1000, 2))
+        elif doc.kind == "pdf":
             subtitle = _("Page {page} of {count}").format(
                 page=self.view.current_page + 1, count=doc.page_count,
             )
