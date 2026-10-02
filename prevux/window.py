@@ -433,6 +433,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
                 section(
                     (_("Show Markup Toolbar"), "win.markup", "<Control><Shift>a"),
                     (_("Customize Toolbar…"), "win.customize-toolbar"),
+                    (_("Soft Proof with Profile…"), "win.soft-proof"),
                     (_("Slideshow"), "win.slideshow", "<Control><Shift>f"),
                     (_("Enter Full Screen"), "win.fullscreen", "F11"),
                 ),
@@ -469,6 +470,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
                     (_("Crop"), "win.crop", "<Control>k"),
                     (_("Adjust Color…"), "win.adjust-color", "<Control><Alt>c"),
                     (_("Adjust Size…"), "win.adjust-size"),
+                    (_("Assign Profile…"), "win.assign-profile"),
                 ),
                 section(
                     (_("Add Text"), "win.add-text"),
@@ -550,6 +552,8 @@ class PrevuxWindow(Adw.ApplicationWindow):
             "fullscreen": self.toggle_fullscreen,
             "slideshow": self.start_slideshow,
             "duplicate": self.duplicate_document,
+            "soft-proof": self.choose_soft_proof,
+            "assign-profile": self.choose_profile,
             "rename": self.rename_document,
             "move-to": self.move_document,
             "revert": self.show_versions,
@@ -624,6 +628,8 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.enable("undo", has_doc and doc.can_undo())
         self.enable("redo", has_doc and doc.can_redo())
         self.enable("find", pdf)
+        self.enable("soft-proof", has_doc)
+        self.enable("assign-profile", image)
         on_disk = has_doc and not getattr(doc, "untitled", False) and not getattr(doc, "converted", False)
         self.enable("duplicate", has_doc)
         self.enable("rename", on_disk)
@@ -684,6 +690,11 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.title_label.set_text(title)
         self.set_title(title)
 
+        if getattr(doc, "proof", None):
+            from . import colors
+            proof_name = colors.name(doc.proof) or Path(doc.proof).stem
+        else:
+            proof_name = None
         if getattr(doc, "frame_durations", None):
             index = min(self.view.current_page, len(doc.frame_durations) - 1)
             subtitle = _("Frame {page} of {count} · {seconds} s").format(
@@ -695,6 +706,8 @@ class PrevuxWindow(Adw.ApplicationWindow):
         else:
             width, height = doc.page_size(0)
             subtitle = f"{width} × {height} px"
+        if proof_name:
+            subtitle += "  ·  " + _("Soft Proof: {name}").format(name=proof_name)
         if len(self.documents) > 1:
             subtitle += "  ·  " + _("{index} of {count} documents").format(
                 index=self.doc_index + 1, count=len(self.documents),
@@ -2123,6 +2136,8 @@ class PrevuxWindow(Adw.ApplicationWindow):
             rows.append((_("Title"), info["title"]))
         if info.get("author"):
             rows.append((_("Author"), info["author"]))
+        if doc.kind == "image":
+            rows.append((_("Color Profile"), info.get("profile") or _("None (sRGB assumed)")))
         rows.append((_("Where"), str(Path(info["path"]).parent)))
 
         for row, (label, value) in enumerate(rows):
@@ -2185,6 +2200,76 @@ class PrevuxWindow(Adw.ApplicationWindow):
         remove.connect("clicked", lambda _b: self.remove_location(doc))
         section.append(remove)
         return section
+
+    # ---- colour profiles ---------------------------------------
+
+    def profile_dialog(self, heading, body, choices, current, apply, accept):
+        """A choice of installed profiles in an alert, as Preview's profile sheets."""
+        dialog = Adw.AlertDialog(heading=heading, body=body)
+        names = [label for label, _value in choices]
+        dropdown = Gtk.DropDown(model=Gtk.StringList.new(names), enable_search=True)
+        dropdown.set_expression(Gtk.PropertyExpression.new(Gtk.StringObject, None, "string"))
+        values = [value for _label, value in choices]
+        if current in values:
+            dropdown.set_selected(values.index(current))
+        dialog.set_extra_child(dropdown)
+        dialog.add_response("cancel", _("Cancel"))
+        dialog.add_response("ok", accept)
+        dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("ok")
+        dialog.set_close_response("cancel")
+        dialog.connect("response", lambda _d, response: response == "ok" and apply(values[dropdown.get_selected()]))
+        dialog.present(self)
+
+    def choose_soft_proof(self):
+        from . import colors
+        if self.doc is None:
+            return
+        kinds = {"CMYK": _("Print"), "GRAY": _("Grayscale"), "RGB": _("Screen")}
+        choices = [(_("Off"), None)] + [
+            (f"{title} ({kinds[kind]})", str(path))
+            for kind in ("CMYK", "GRAY", "RGB")
+            for title, path, profile_kind in colors.installed() if profile_kind == kind]
+
+        def apply(path):
+            for doc in self.documents:
+                if hasattr(doc, "set_proof"):
+                    doc.set_proof(path)
+            self.view.queue_draw()
+            self.update_titles()
+        self.profile_dialog(_("Soft Proof with Profile"),
+                            _("Shows how the document looks on another device, e.g. a printing press. "
+                              "The file is not changed."),
+                            choices, getattr(self.doc, "proof", None), apply, _("Show"))
+
+    def choose_profile(self):
+        from . import colors
+        doc = self.doc
+        if doc is None or doc.kind != "image":
+            return
+        rgb = [(title, path) for title, path, kind in colors.installed() if kind == "RGB"]
+        choices = [(_("sRGB (standard)"), None)] + [(title, str(path)) for title, path in rgb
+                                                     if "srgb" not in title.lower().replace(" ", "")]
+        current = None
+        if doc.icc and not colors.is_srgb(doc.icc):
+            own = colors.name(doc.icc)
+            for title, path in choices[1:]:
+                if title == own:
+                    current = path
+            if current is None:
+                choices.insert(1, (own or _("Embedded profile"), "embedded"))
+                current = "embedded"
+
+        def apply(path):
+            if path == "embedded":
+                return
+            doc.checkpoint(structure=True)
+            doc.assign_profile(None if path is None else Path(path).read_bytes())
+            self.after_edit()
+        self.profile_dialog(_("Assign Profile"),
+                            _("Tells how the colour values of the picture are meant. The pixels stay unchanged; "
+                              "the profile is saved with the picture."),
+                            choices, current, apply, _("Assign"))
 
     def remove_location(self, doc):
         self.info_popover.popdown()
