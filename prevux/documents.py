@@ -258,6 +258,26 @@ class ImageDocument(BaseDocument):
             self.image = image.copy()
         self.annotations = [[]]
         self._texture = None
+        self.ocr_words = None        # Live Text, filled in the background
+
+    # --- Live Text ----------------------------------------------
+
+    def pages_needing_ocr(self):
+        return [] if self.ocr_words is not None else [0]
+
+    def ocr_page(self, index):
+        from . import ocr
+        return ocr.recognize(self.composited())
+
+    def set_ocr(self, index, words):
+        self.ocr_words = words
+
+    def page_words(self, index=0):
+        return self.ocr_words or []
+
+    def search(self, text):
+        from . import ocr
+        return [(0, rect) for rect in ocr.search_words(self.page_words(0), text)]
 
     def page_size(self, index=0):
         return self.image.size
@@ -275,6 +295,7 @@ class ImageDocument(BaseDocument):
     def changed(self):
         super().changed()
         self._texture = None
+        self.ocr_words = None        # the picture changed: recognise again
 
     def default_text_size(self):
         return max(14.0, min(self.image.size) / 22)
@@ -488,8 +509,37 @@ class PDFDocument(BaseDocument):
 
     # --- text -------------------------------------------------
 
+    # --- Live Text: scanned pages without a text layer -------------
+    OCR_PAGE_LIMIT = 60
+    OCR_DPI = 200
+
+    def pages_needing_ocr(self):
+        ocr_pages = getattr(self, "ocr_pages", {})
+        pages = []
+        for index in range(min(self.page_count, self.OCR_PAGE_LIMIT)):
+            if index not in ocr_pages and not self.doc[index].get_text("text").strip():
+                pages.append(index)
+        return pages
+
+    def ocr_page(self, index):
+        from . import ocr
+        page = self.doc[index]
+        pixmap = page.get_pixmap(dpi=self.OCR_DPI, annots=False)
+        image = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples) if pixmap.n == 3 else \
+            Image.frombytes("RGBA", (pixmap.width, pixmap.height), pixmap.samples).convert("RGB")
+        return ocr.recognize(image, self.OCR_DPI / 72)
+
+    def set_ocr(self, index, words):
+        if not hasattr(self, "ocr_pages"):
+            self.ocr_pages = {}
+        self.ocr_pages[index] = words
+        self.words.pop(index, None)
+
     def page_words(self, index):
         """Words in display coordinates, in reading order."""
+        ocr_pages = getattr(self, "ocr_pages", {})
+        if index in ocr_pages:
+            return ocr_pages[index]
         if index not in self.words:
             page = self.doc[index]
             matrix = page.rotation_matrix
@@ -584,8 +634,13 @@ class PDFDocument(BaseDocument):
         return result
 
     def search(self, text):
+        from . import ocr
         results = []
+        ocr_pages = getattr(self, "ocr_pages", {})
         for index, page in enumerate(self.doc):
+            if index in ocr_pages:
+                results += [(index, rect) for rect in ocr.search_words(ocr_pages[index], text)]
+                continue
             for quad in page.search_for(text):
                 rect = quad * page.rotation_matrix
                 results.append((index, (rect.x0, rect.y0, rect.x1, rect.y1)))
@@ -1262,3 +1317,7 @@ def export_filtered(doc, path, key):
         image = ImageOps.colorize(ImageOps.grayscale(image), "#2e1f0f", "#f3e3c3", mid="#a07850")
     suffix = Path(path).suffix.lower()
     image.save(str(path), "JPEG" if suffix in (".jpg", ".jpeg") else (Image.registered_extensions().get(suffix) or "PNG"))
+
+
+# Images reuse the PDF's line snippet for search results (it only needs page_words).
+ImageDocument.snippet = PDFDocument.snippet

@@ -765,7 +765,45 @@ class PrevuxWindow(Adw.ApplicationWindow):
         if self.sidebar.mode == "contents":
             self.sidebar.fill_contents(doc)
         self.apply_opening_settings(doc)
+        self.start_live_text(doc)
         self.update_state()
+
+    def start_live_text(self, doc):
+        """Recognise text in images and scanned pages in the background (Live Text)."""
+        from . import ocr
+        if doc is None or getattr(doc, "ocr_running", False) or not ocr.available():
+            return
+        pages = doc.pages_needing_ocr()
+        if not pages:
+            return
+        doc.ocr_running = True
+        version = doc.version
+        import threading
+
+        def work():
+            for index in pages:
+                try:
+                    words = doc.ocr_page(index)
+                except Exception as error:
+                    print("Prevux: Live Text failed:", error)
+                    words = []
+                GLib.idle_add(self.live_text_ready, doc, index, words, version)
+            GLib.idle_add(finished)
+
+        def finished():
+            doc.ocr_running = False
+            if doc.version != version and doc.kind == "image":
+                self.start_live_text(doc)        # edited while recognising: once more
+            return False
+        threading.Thread(target=work, daemon=True).start()
+
+    def live_text_ready(self, doc, index, words, version):
+        if doc.version != version and doc.kind == "image":
+            return False          # the picture was edited meanwhile; a new run follows
+        doc.set_ocr(index, words)
+        if doc is self.doc:
+            self.view.queue_draw()
+        return False
 
     def apply_opening_settings(self, doc):
         """Preview's PDF settings: view mode for first opening, continue at the last page."""
@@ -1057,6 +1095,8 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.view.refresh()
         doc.modified = True
         self.update_state()
+        if doc.kind == "image":
+            GLib.timeout_add(600, lambda: self.start_live_text(doc) and False)
 
     def undo(self):
         self.history(True)
