@@ -372,6 +372,10 @@ class PrevuxWindow(Adw.ApplicationWindow):
                     (_("Open…"), "win.open", "<Control>o"),
                 ),
                 section(
+                    (_("Import from Scanner…"), "win.import-scanner"),
+                    (_("Take Photo…"), "win.take-photo"),
+                ),
+                section(
                     (_("Close"), "win.close", "<Control>w"),
                     (_("Save"), "win.save", "<Control>s"),
                     (_("Duplicate"), "win.duplicate", "<Control><Shift>d"),
@@ -555,6 +559,8 @@ class PrevuxWindow(Adw.ApplicationWindow):
             "fullscreen": self.toggle_fullscreen,
             "slideshow": self.start_slideshow,
             "duplicate": self.duplicate_document,
+            "import-scanner": self.import_from_scanner,
+            "take-photo": self.take_photo,
             "soft-proof": self.choose_soft_proof,
             "assign-profile": self.choose_profile,
             "rename": self.rename_document,
@@ -1203,6 +1209,24 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.lock_dialog = dialog
         dialog.present(self)
         return False
+
+    def import_from_scanner(self):
+        from .capture import ScanDialog
+        ScanDialog(lambda pages: self.add_captured(pages, _("Scan {time}"))).present(self)
+
+    def take_photo(self):
+        from .capture import CameraDialog
+        CameraDialog(lambda pages: self.add_captured(pages, _("Photo {time}"))).present(self)
+
+    def add_captured(self, pages, title):
+        from .capture import pages_to_document, stamp
+        try:
+            doc = pages_to_document(pages, title.format(time=stamp()))
+        except Exception as error:
+            self.show_error(_("The pages could not be opened."), str(error))
+            return
+        self.add_documents([doc])
+        self.toast(_("{count} pages scanned").format(count=doc.page_count) if doc.page_count > 1 else _("Imported – save to keep it"))
 
     def duplicate_document(self):
         doc = self.doc

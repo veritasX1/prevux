@@ -182,3 +182,13 @@ window.slideshow picture {
   border-radius: 999px;
   padding: 6px 12px;
 }
+
+/* Camera: dark picture area and a round shutter button */
+.camera-preview {
+  background-color: black;
+}
+
+button.shutter {
+  min-width: 48px;
+  min-height: 48px;
+}
