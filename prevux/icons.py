@@ -556,7 +556,13 @@ class Swatch(Gtk.Widget):
         cr.stroke()
 
 
-def icon_button(name, tooltip, toggle=False, size=16):
+# Toolbar symbols at 20 px with 34 × 32 px buttons (Apple HIG: toolbar glyphs around
+# 18–20 pt, hit targets at least 28 pt). Drawn on a 16 grid, scaled, so lines get a
+# little heavier too – like the "medium" weight of toolbar symbols on the Mac.
+TOOLBAR = 20
+
+
+def icon_button(name, tooltip, toggle=False, size=TOOLBAR):
     button = Gtk.ToggleButton() if toggle else Gtk.Button()
     button.set_child(Icon(name, size))
     button.set_tooltip_text(tooltip)
@@ -564,7 +570,7 @@ def icon_button(name, tooltip, toggle=False, size=16):
     return button
 
 
-def icon_menu_button(name, tooltip, popover=None, size=16):
+def icon_menu_button(name, tooltip, popover=None, size=TOOLBAR):
     button = Gtk.MenuButton()
     button.set_child(Icon(name, size))
     button.set_tooltip_text(tooltip)

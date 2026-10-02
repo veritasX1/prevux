@@ -13,7 +13,7 @@ gi.require_version("PangoCairo", "1.0")
 from gi.repository import Adw, Gdk, GLib, Graphene, Gtk, PangoCairo
 
 from .i18n import _
-from .icons import Icon, Swatch, icon_button, icon_menu_button
+from .icons import TOOLBAR, Icon, Swatch, icon_button, icon_menu_button
 from .model import (
     BLACK,
     PALETTE,
@@ -160,7 +160,7 @@ class MarkupToolbar(Gtk.Box):
         button.set_always_show_arrow(True)
         self.append(button)
 
-        self.border_icon = Icon("border-color")
+        self.border_icon = Icon("border-color", TOOLBAR)
         self.border_popover = ColorPopover(self, "stroke", allow_none=True)
         button = Gtk.MenuButton(child=self.border_icon, popover=self.border_popover)
         button.set_tooltip_text(_("Border Color"))
@@ -168,7 +168,7 @@ class MarkupToolbar(Gtk.Box):
         button.add_css_class("flat")
         self.append(button)
 
-        self.fill_icon = Icon("fill-color")
+        self.fill_icon = Icon("fill-color", TOOLBAR)
         self.fill_popover = ColorPopover(self, "fill", allow_none=True)
         button = Gtk.MenuButton(child=self.fill_icon, popover=self.fill_popover)
         button.set_tooltip_text(_("Fill Color"))
@@ -248,7 +248,7 @@ class MarkupToolbar(Gtk.Box):
         grid.set_margin_top(8)
         grid.set_margin_bottom(8)
         for index, (kind, name) in enumerate(SHAPES):
-            button = Gtk.Button(child=Icon("shape-" + kind, 20))
+            button = Gtk.Button(child=Icon("shape-" + kind, 24))
             button.set_tooltip_text(_(name))
             button.add_css_class("flat")
             button.set_size_request(40, 36)
