@@ -54,6 +54,9 @@ def open_document(path):
     if suffix in BOOK_EXTENSIONS:
         return ConvertedDocument(path, book_to_pdf(path))
     if suffix in IMAGE_EXTENSIONS:
+        frames = animation_frames(path)
+        if frames is not None:
+            return AnimationDocument(path, *frames)
         return ImageDocument(path)
 
     # Unknown extension: try image first, then PDF.
@@ -1253,6 +1256,44 @@ class ConvertedDocument(PDFDocument):
 
     def __init__(self, path, data):
         super().__init__(path, data=data)
+
+
+MAX_FRAMES = 1000
+
+
+def animation_frames(path):
+    """For animated GIF/PNG/WebP: (PDF bytes with one page per frame, durations in ms),
+    otherwise None. Every frame is the full picture as it is shown at that moment."""
+    from PIL import ImageSequence
+    try:
+        with Image.open(path) as image:
+            if getattr(image, "n_frames", 1) < 2:
+                return None
+            pdf = pymupdf.open()
+            durations = []
+            for index, frame in enumerate(ImageSequence.Iterator(image)):
+                if index >= MAX_FRAMES:
+                    break
+                durations.append(int(frame.info.get("duration") or 100))
+                buffer = io.BytesIO()
+                frame.convert("RGBA").save(buffer, "PNG")
+                page = pdf.new_page(width=frame.width, height=frame.height)
+                page.insert_image(page.rect, stream=buffer.getvalue())
+            data = pdf.tobytes(deflate=True)
+            pdf.close()
+            return data, durations
+    except Exception as error:
+        print("Prevux: animation could not be read:", error)
+        return None
+
+
+class AnimationDocument(ConvertedDocument):
+    """An animated GIF/PNG/WebP: each frame is a page (Preview shows them in the sidebar).
+    The original file stays as it is; saving exports a PDF, a single frame exports as image."""
+
+    def __init__(self, path, data, durations):
+        super().__init__(path, data)
+        self.frame_durations = durations
 
 
 PAGE_CSS = """

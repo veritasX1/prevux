@@ -257,6 +257,7 @@ GERMAN = {
     "No Table of Contents": "Kein Inhaltsverzeichnis",
     "Bookmarks": "Lesezeichen",
     "Slideshow": "Diashow",
+    "Frame {page} of {count} · {seconds} s": "Bild {page} von {count} · {seconds} s",
     "Duplicate": "Duplizieren",
     "Rename…": "Umbenennen …",
     "Move To…": "Bewegen nach …",
