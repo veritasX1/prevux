@@ -35,6 +35,7 @@ ACCELERATORS = {
     "win.display-mode::single": ["<Control>2"],
     "win.display-mode::two": ["<Control>3"],
     "win.zoom-selection": ["<Control>asterisk"],
+    "win.remove-background": ["<Control><Shift>k"],
     "win.actual-size": ["<Control>0"],
     "win.zoom-fit": ["<Control>9"],
     "win.zoom-in": ["<Control>plus", "<Control>equal", "<Control>KP_Add"],

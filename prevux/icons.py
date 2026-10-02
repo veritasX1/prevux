@@ -44,6 +44,21 @@ def icon_sidebar(cr):
     _stroke(cr, 1.0)
 
 
+def icon_lasso(cr):
+    # A loop with a dangling cord, like the lasso selection symbol.
+    cr.save()
+    cr.translate(8, 6.2)
+    cr.scale(1, 0.62)
+    cr.arc(0, 0, 6.2, 0, 2 * math.pi)
+    cr.restore()
+    _stroke(cr)
+    cr.move_to(3.6, 9.4)
+    cr.curve_to(3.0, 11.4, 4.6, 12.2, 3.6, 14.6)
+    _stroke(cr)
+    cr.arc(4.3, 9.6, 1.1, 0, 2 * math.pi)
+    _stroke(cr, 1.1)
+
+
 def icon_zoom_in(cr):
     _magnifier(cr)
     cr.move_to(4.6, 6.8)

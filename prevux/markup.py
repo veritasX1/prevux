@@ -127,6 +127,7 @@ class MarkupToolbar(Gtk.Box):
         for tool, icon, tooltip in (
             ("text-select", "text-select", _("Text Selection")),
             ("rect-select", "rect-select", _("Rectangular Selection")),
+            ("lasso-select", "lasso", _("Smart Lasso")),
             ("redact", "redact", _("Redact")),
             ("sketch", "sketch", _("Sketch")),
             ("note", "note", _("Note")),
