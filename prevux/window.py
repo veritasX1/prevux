@@ -332,6 +332,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
                     (_("Save"), "win.save", "<Control>s"),
                     (_("Export…"), "win.export", "<Control><Shift>s"),
                     (_("Export as PDF…"), "win.export-pdf"),
+                    (_("Edit Permissions…"), "win.edit-permissions"),
                 ),
                 section(
                     (_("Share…"), "win.share"),
@@ -500,6 +501,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
             "highlight": self.highlight_now,
             "crop": self.crop,
             "remove-background": self.remove_background,
+            "edit-permissions": self.edit_permissions,
             "adjust-color": self.adjust_color,
             "adjust-size": self.adjust_size,
             "add-text": lambda: self.view.insert_text(),
@@ -559,6 +561,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.enable("cut", has_doc and self.view.selected is not None)
         self.enable("delete", has_doc and (self.view.selected is not None or getattr(self.view, "lasso", None) is not None))
         self.enable("remove-background", image)
+        self.enable("edit-permissions", pdf)
         self.enable("previous-document", self.doc_index > 0)
         self.enable("next-document", self.doc_index < len(self.documents) - 1)
 
@@ -1115,6 +1118,20 @@ class PrevuxWindow(Adw.ApplicationWindow):
             return
         self.view.delete_selected()
         self.update_state()
+
+    def edit_permissions(self):
+        doc = self.doc
+        if doc is None or doc.kind != "pdf":
+            return
+        from .permissions import PermissionsDialog
+
+        def apply(protection):
+            doc.protection = protection
+            doc.modified = True
+            self.view.notify_modified()
+            self.update_state()
+            self.toast(_("The permissions apply when you save the document."))
+        PermissionsDialog(doc, apply).present(self)
 
     def remove_background(self):
         """Preview: Tools → Remove Background (⇧⌘K)."""

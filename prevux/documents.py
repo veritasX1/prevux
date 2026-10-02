@@ -659,6 +659,42 @@ class PDFDocument(BaseDocument):
         self.annotations.insert(index, annotations)
         self.changed()
 
+    # --- permissions (Preview: File → Edit Permissions) ----------------
+    # protection: None = keep as it is; {} = remove all protection;
+    # {"open": "...", "owner": "...", "allow": ["print", "copy", ...]} = protect.
+    PERMISSIONS = {
+        "print": pymupdf.PDF_PERM_PRINT | pymupdf.PDF_PERM_PRINT_HQ,
+        "copy": pymupdf.PDF_PERM_COPY | pymupdf.PDF_PERM_ACCESSIBILITY,
+        "assemble": pymupdf.PDF_PERM_ASSEMBLE,
+        "annotate": pymupdf.PDF_PERM_ANNOTATE | pymupdf.PDF_PERM_MODIFY,
+        "forms": pymupdf.PDF_PERM_FORM,
+    }
+
+    def encryption_options(self):
+        protection = getattr(self, "protection", None)
+        if protection is None:
+            return {}
+        if not protection:
+            return {"encryption": pymupdf.PDF_ENCRYPT_NONE}
+        permissions = pymupdf.PDF_PERM_ACCESSIBILITY
+        for name in protection.get("allow", []):
+            permissions |= self.PERMISSIONS.get(name, 0)
+        return {
+            "encryption": pymupdf.PDF_ENCRYPT_AES_256,
+            "owner_pw": protection.get("owner") or protection.get("open") or "",
+            "user_pw": protection.get("open") or "",
+            "permissions": permissions,
+        }
+
+    def current_permissions(self):
+        """What the file allows now (for the dialog)."""
+        allowed = []
+        bits = self.doc.permissions
+        for name, flag in self.PERMISSIONS.items():
+            if bits & flag:
+                allowed.append(name)
+        return allowed
+
     def pages_to_pdf(self, pages, path):
         """Write some pages – with their markup – into a new PDF (dragging thumbnails out)."""
         added = self.export_annotations()
@@ -794,7 +830,7 @@ class PDFDocument(BaseDocument):
                 flat.save(temp, garbage=3, deflate=True)
                 flat.close()
             else:
-                self.doc.save(temp, garbage=1, deflate=True)
+                self.doc.save(temp, garbage=1, deflate=True, **self.encryption_options())
             os.replace(temp, path)
         finally:
             self.remove_exported(added)
