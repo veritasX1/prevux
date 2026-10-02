@@ -257,6 +257,8 @@ GERMAN = {
     "No Table of Contents": "Kein Inhaltsverzeichnis",
     "Bookmarks": "Lesezeichen",
     "Slideshow": "Diashow",
+    "Reduce transparency": "Transparenz reduzieren",
+    "Solid toolbar instead of glass the pages shine through": "Deckende Symbolleiste statt Glas, durch das die Seiten scheinen",
     "Import from Scanner…": "Vom Scanner importieren …",
     "Import from Scanner": "Vom Scanner importieren",
     "Take Photo…": "Foto aufnehmen …",

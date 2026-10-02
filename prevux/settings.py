@@ -20,7 +20,8 @@ DEFAULTS = {
     "reopen_last_page": True,
     "pdf_view": "continuous",      # continuous, single, two
     "author": "",                  # name written into notes and markup
-    "open_in_tabs": False,         # files opened from outside join the window as tabs
+    "open_in_tabs": False,
+    "reduce_transparency": False,  # solid toolbar instead of glass (Apple: Accessibility)         # files opened from outside join the window as tabs
     "toolbar_hidden": [],          # toolbar items switched off (View → Customize Toolbar)
 }
 TOOLBAR_ITEMS = [                  # (key, label) in the order they appear, left to right
@@ -149,6 +150,12 @@ class PreferencesDialog(Adw.PreferencesDialog):
         row.add_suffix(button)
         row.add_suffix(reset)
         group.add(row)
+        page.add(group)
+        reduce = Adw.SwitchRow(title=_("Reduce transparency"),
+                               subtitle=_("Solid toolbar instead of glass the pages shine through"),
+                               active=get("reduce_transparency"))
+        reduce.connect("notify::active", lambda r, _p: self.set("reduce_transparency", r.get_active()))
+        group.add(reduce)
         page.add(group)
         group = Adw.PreferencesGroup(title=_("Windows"))
         tabs = Adw.SwitchRow(title=_("Open documents in tabs"),

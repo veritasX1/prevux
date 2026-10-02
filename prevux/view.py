@@ -79,6 +79,7 @@ class DocumentView(Gtk.Widget):
         self.fit_mode = "page"
         self.current_page = 0
         self.bookmarks = set()          # bookmarked pages get a ribbon (set by the window)
+        self.top_inset = 0              # height of the glass toolbar the pages scroll under
         self.tool = "select"
         self.highlight_mode = None
 
@@ -206,7 +207,7 @@ class DocumentView(Gtk.Widget):
             return 1, 1
         sizes = [self.row_size(row) for row in rows]
         width = max(w for w, _h in sizes) + 2 * MARGIN
-        height = sum(h for _w, h in sizes) + GAP * (len(sizes) - 1) + 2 * MARGIN
+        height = sum(h for _w, h in sizes) + GAP * (len(sizes) - 1) + 2 * MARGIN + self.top_inset
         return int(math.ceil(width)), int(math.ceil(height))
 
     def do_measure(self, orientation, for_size):
@@ -226,7 +227,7 @@ class DocumentView(Gtk.Widget):
 
         # Pages not shown (single page mode) get an empty rectangle far away.
         rects = [(-1e6, -1e6, 0.0, 0.0)] * self.doc.page_count
-        y = MARGIN
+        y = MARGIN + self.top_inset
         for row in self.layout_rows():
             row_width, row_height = self.row_size(row)
             x = max(MARGIN, (width - row_width) / 2)
@@ -298,12 +299,28 @@ class DocumentView(Gtk.Widget):
         GLib.idle_add(lambda: self.scroll_to_page(page) and False)
 
     def viewport_size(self):
-        return self.scroller.get_width(), self.scroller.get_height()
+        """The usable area: below a translucent toolbar the pages can scroll under."""
+        return self.scroller.get_width(), max(1, self.scroller.get_height() - self.top_inset)
 
     def visible_range(self):
         vadjustment = self.scroller.get_vadjustment()
         top = vadjustment.get_value()
-        return top, top + vadjustment.get_page_size()
+        return top + self.top_inset, top + vadjustment.get_page_size()
+
+    def set_top_inset(self, inset):
+        if abs(inset - self.top_inset) < 0.5:
+            return
+        delta = inset - self.top_inset
+        adjustment = self.scroller.get_vadjustment()
+        if adjustment.get_value() > 0.5:
+            # Scrolled into the document: the bar slides over the pages, they stay put.
+            adjustment.set_upper(adjustment.get_upper() + delta)
+            adjustment.set_value(adjustment.get_value() + delta)
+        self.top_inset = inset
+        self.layout_cache = None
+        self.queue_resize()
+        if self.fit_mode:
+            GLib.idle_add(self.refit)
 
     def do_size_allocate(self, width, height, baseline):
         self.layout_cache = None
@@ -406,7 +423,7 @@ class DocumentView(Gtk.Widget):
     def scroll_to_anchor(self, located, view_x, view_y):
         """Set both scroll positions for the new zoom before the next layout."""
         page, x, y = located
-        view_width, view_height = self.viewport_size()
+        view_width, view_height = self.scroller.get_width(), self.scroller.get_height()
         content_width, content_height = self.content_size()
         width, height = max(view_width, content_width), max(view_height, content_height)
         rects = self.page_rects((width, height))
@@ -425,8 +442,21 @@ class DocumentView(Gtk.Widget):
 
     ZOOM_EASE = 18.0        # per second: about 150 ms until a wheel step has settled
 
+    @staticmethod
+    def animations_enabled():
+        """GNOME Settings → Accessibility → Animations (Apple: Reduce Motion)."""
+        settings = Gtk.Settings.get_default()
+        return settings is None or settings.get_property("gtk-enable-animations")
+
     def animate_zoom(self, target, viewport_point):
         """Glide towards `target`, keeping the document point under `viewport_point` in place."""
+        if not self.animations_enabled():
+            anchor = None
+            if viewport_point is not None:
+                anchor = (self.scroller.get_hadjustment().get_value() + viewport_point[0],
+                          self.scroller.get_vadjustment().get_value() + viewport_point[1])
+            self.set_zoom(target, anchor)
+            return
         self.zoom_target = max(MIN_ZOOM, min(MAX_ZOOM, target))
         self.zoom_point = viewport_point
         if getattr(self, "zoom_tick", None) is None:
@@ -461,6 +491,10 @@ class DocumentView(Gtk.Widget):
 
     def smooth_scroll(self, adjustment, delta):
         """Mouse wheel notches glide instead of jumping (touchpads scroll smoothly already)."""
+        if not self.animations_enabled():
+            adjustment.set_value(max(adjustment.get_lower(),
+                                     min(adjustment.get_upper() - adjustment.get_page_size(), adjustment.get_value() + delta)))
+            return
         animations = self.__dict__.setdefault("scroll_animations", {})
         current = animations.get(adjustment)
         start = current["target"] if current else adjustment.get_value()
@@ -585,7 +619,7 @@ class DocumentView(Gtk.Widget):
         if not 0 <= page < len(rects):
             return
         _x, top, _w, _h = rects[page]
-        value = top - MARGIN / 2 if y is None else top + y * self.zoom - 60
+        value = (top - MARGIN / 2 if y is None else top + y * self.zoom - 60) - self.top_inset
         self.current_page = page
         self.scroller.get_vadjustment().set_value(value)
         self.emit("page-changed", page)
