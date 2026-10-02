@@ -879,29 +879,61 @@ class RedactAnnotation(MarkupAnnotation):
 # ============================================================
 
 class LoupeAnnotation(Annotation):
-    """A round magnifier. The magnified content comes from a page source
-    (a cairo surface or the view's texture); draw() adds the frame."""
+    """A round magnifier. The lens shows the area around its target, magnified. When the
+    lens is moved off its target, a thin circle marks the magnified area and a line with an
+    end point leads from it to the lens – nothing important is covered.
+    The magnified content comes from a page source (a cairo surface or the view's texture);
+    draw() adds frame and pointer."""
 
     kind = "loupe"
 
-    def __init__(self, center, radius, magnification=2.0, style=None):
+    def __init__(self, center, radius, magnification=2.0, style=None, target=None):
         super().__init__(style)
         self.cx, self.cy = center
         self.radius = radius
         self.magnification = magnification
+        self.tx, self.ty = target if target is not None else center
+
+    def target(self):
+        # Loupes from before the pointer have no target: they magnify their centre.
+        return getattr(self, "tx", self.cx), getattr(self, "ty", self.cy)
+
+    def area_radius(self):
+        """Radius of the magnified area around the target."""
+        return self.radius / self.magnification
+
+    def detached(self):
+        tx, ty = self.target()
+        return math.hypot(tx - self.cx, ty - self.cy) > self.radius * 0.35
 
     def bounds(self):
         r = self.radius
-        return (self.cx - r, self.cy - r, self.cx + r, self.cy + r)
+        x0, y0, x1, y1 = self.cx - r, self.cy - r, self.cx + r, self.cy + r
+        if self.detached():
+            tx, ty = self.target()
+            a = self.area_radius()
+            x0, y0, x1, y1 = min(x0, tx - a), min(y0, ty - a), max(x1, tx + a), max(y1, ty + a)
+        return (x0, y0, x1, y1)
 
     def transform(self, function):
+        """Page changes (rotate, crop, scale) take lens and target along."""
+        tx, ty = self.target()
         ax, ay = function(self.cx - self.radius, self.cy)
         bx, by = function(self.cx + self.radius, self.cy)
         self.cx, self.cy = function(self.cx, self.cy)
+        self.tx, self.ty = function(tx, ty)
         self.radius = max(4.0, math.hypot(bx - ax, by - ay) / 2)
 
+    def move(self, dx, dy):
+        """Dragging moves the lens only; the magnified spot stays where it is."""
+        self.tx, self.ty = self.target()
+        self.cx += dx
+        self.cy += dy
+
     def reorient(self, function):
+        tx, ty = self.target()
         self.cx, self.cy = function(self.cx, self.cy)
+        self.tx, self.ty = function(tx, ty)
 
     def magnifier_handle(self):
         angle = -math.pi / 4
@@ -911,16 +943,22 @@ class LoupeAnnotation(Annotation):
         )
 
     def handles(self):
-        x0, y0, x1, y1 = self.bounds()
+        r = self.radius
+        x0, y0, x1, y1 = self.cx - r, self.cy - r, self.cx + r, self.cy + r
         return [
             ("nw", x0, y0), ("ne", x1, y0), ("sw", x0, y1), ("se", x1, y1),
             ("magnify", *self.magnifier_handle()),
+            ("target", *self.target()),
         ]
 
     def resize(self, handle, x, y, original):
         self.cx, self.cy = original.cx, original.cy
         self.radius = original.radius
         self.magnification = original.magnification
+        self.tx, self.ty = original.target()
+        if handle == "target":
+            self.tx, self.ty = x, y
+            return
         distance = math.hypot(x - original.cx, y - original.cy)
         if handle == "magnify":
             factor = distance / max(1.0, original.radius)
@@ -929,25 +967,45 @@ class LoupeAnnotation(Annotation):
             self.radius = max(8.0, distance / math.sqrt(2))
 
     def hit(self, x, y, tolerance):
-        return math.hypot(x - self.cx, y - self.cy) <= self.radius + tolerance
+        if math.hypot(x - self.cx, y - self.cy) <= self.radius + tolerance:
+            return True
+        tx, ty = self.target()
+        return self.detached() and math.hypot(x - tx, y - ty) <= self.area_radius() + tolerance
 
     def clip_path(self, cr):
         cr.new_path()
         cr.arc(self.cx, self.cy, self.radius, 0, 2 * math.pi)
 
     def draw(self, cr, source=None, source_scale=1.0):
+        tx, ty = self.target()
         if source is not None:
             cr.save()
             self.clip_path(cr)
             cr.clip()
             cr.translate(self.cx, self.cy)
             cr.scale(self.magnification, self.magnification)
-            cr.translate(-self.cx, -self.cy)
+            cr.translate(-tx, -ty)
             cr.scale(1 / source_scale, 1 / source_scale)
             cr.set_source_surface(source, 0, 0)
             cr.get_source().set_filter(cairo.FILTER_GOOD)
             cr.paint()
             cr.restore()
+
+        color = self.style.stroke or (0.55, 0.55, 0.6, 1.0)
+        if self.detached():
+            # Pointer: circle around the magnified spot, a line to the lens, an end point.
+            area = self.area_radius()
+            angle = math.atan2(self.cy - ty, self.cx - tx)
+            set_color(cr, color)
+            cr.set_line_width(max(0.6, self.style.width * 0.6))
+            cr.new_path()
+            cr.arc(tx, ty, area, 0, 2 * math.pi)
+            cr.stroke()
+            cr.move_to(tx + math.cos(angle) * area, ty + math.sin(angle) * area)
+            cr.line_to(self.cx - math.cos(angle) * self.radius, self.cy - math.sin(angle) * self.radius)
+            cr.stroke()
+            cr.arc(tx + math.cos(angle) * area, ty + math.sin(angle) * area, max(1.2, self.style.width * 1.1), 0, 2 * math.pi)
+            cr.fill()
 
         # Soft shadow and frame.
         cr.save()
@@ -958,7 +1016,7 @@ class LoupeAnnotation(Annotation):
         cr.restore()
 
         self.clip_path(cr)
-        set_color(cr, self.style.stroke or (0.55, 0.55, 0.6, 1.0))
+        set_color(cr, color)
         cr.set_line_width(self.style.width)
         cr.stroke()
 
