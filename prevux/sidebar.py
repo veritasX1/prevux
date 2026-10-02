@@ -1,5 +1,7 @@
 """Thumbnail sidebar with page management (reorder, rotate, delete)."""
 
+from pathlib import Path
+
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -436,7 +438,40 @@ class Sidebar(Gtk.Box):
 
     def on_drag_prepare(self, source, x, y, row):
         value = GObject.Value(GObject.TYPE_STRING, self.drag_key(row))
-        return Gdk.ContentProvider.new_for_value(value)
+        providers = [Gdk.ContentProvider.new_for_value(value)]
+        # Also a real PDF, so pages dropped into the file manager or on the desktop
+        # become a new document (as in Preview).
+        exported = self.export_dragged(row)
+        if exported is not None:
+            files = Gdk.FileList.new_from_list([Gio.File.new_for_path(str(exported))])
+            providers.append(Gdk.ContentProvider.new_for_value(GObject.Value(Gdk.FileList, files)))
+        return Gdk.ContentProvider.new_union(providers)
+
+    def export_dragged(self, row):
+        """The dragged page – or all selected pages of that document – as a PDF file."""
+        from .documents import DRAG_FOLDER
+        if row.doc_index >= len(self.documents):
+            return None
+        doc = self.documents[row.doc_index]
+        pages = sorted(page for doc_index, page in self.selected_pages() if doc_index == row.doc_index)
+        if row.page not in pages:
+            pages = [row.page]
+        try:
+            DRAG_FOLDER.mkdir(parents=True, exist_ok=True)
+            stem = Path(doc.name).stem
+            if len(pages) == 1:
+                name = _("{name} – Page {page}").format(name=stem, page=pages[0] + 1)
+            else:
+                name = _("{name} – Pages {first}–{last}").format(name=stem, first=pages[0] + 1, last=pages[-1] + 1)
+            path = DRAG_FOLDER / (name.replace("/", "-") + ".pdf")
+            if doc.kind == "pdf":
+                doc.pages_to_pdf(pages, path)
+            else:
+                doc.save(str(path), "PDF")
+            return path
+        except Exception as error:
+            print("Prevux: could not export dragged pages:", error)
+            return None
 
     def on_drag_begin(self, source, drag, row):
         paintable = row.picture.get_paintable()

@@ -40,6 +40,9 @@ BOOK_EXTENSIONS = {".epub", ".mobi", ".fb2", ".cbz", ".xps", ".oxps", ".svg"}
 
 PREVUX_KEY = "PrevuxData"
 
+# Thumbnails dragged out of the sidebar become PDFs here first (the file manager copies them).
+DRAG_FOLDER = Path(GLib.get_user_cache_dir()) / "prevux" / "drag"
+
 
 def open_document(path):
     suffix = Path(path).suffix.lower()
@@ -627,6 +630,18 @@ class PDFDocument(BaseDocument):
                 annotation.normalize()
         self.annotations.insert(index, annotations)
         self.changed()
+
+    def pages_to_pdf(self, pages, path):
+        """Write some pages – with their markup – into a new PDF (dragging thumbnails out)."""
+        added = self.export_annotations()
+        try:
+            target = pymupdf.open()
+            for page in sorted(pages):
+                target.insert_pdf(self.doc, from_page=page, to_page=page)
+            target.save(str(path), garbage=1, deflate=True)
+            target.close()
+        finally:
+            self.remove_exported(added)
 
     def insert_blank_page(self, index):
         width, height = self.page_size(max(0, min(index, self.page_count - 1)))

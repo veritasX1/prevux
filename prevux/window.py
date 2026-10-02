@@ -353,6 +353,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
                 ),
                 section(
                     (_("Insert Blank Page"), "win.insert-blank-page"),
+                    (_("Insert Pages from File…"), "win.insert-from-file"),
                     (_("Delete Pages"), "win.delete-pages"),
                 ),
                 section((_("Find…"), "win.find", "<Control>f")),
@@ -466,6 +467,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
             "select-all": self.select_all,
             "find": self.focus_search,
             "insert-blank-page": self.insert_blank_page,
+            "insert-from-file": self.insert_from_file,
             "delete-pages": self.delete_pages,
             "hide-sidebar": lambda: self.split.set_show_sidebar(False),
             "show-sidebar": lambda: self.show_sidebar_mode("thumbnails"),
@@ -538,6 +540,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.enable("find", pdf)
         self.enable("highlight", pdf)
         self.enable("insert-blank-page", pdf)
+        self.enable("insert-from-file", pdf)
         self.enable("delete-pages", pdf and doc.page_count > 1)
         self.enable("flip-horizontal", image)
         self.enable("flip-vertical", image)
@@ -675,7 +678,10 @@ class PrevuxWindow(Adw.ApplicationWindow):
         return False
 
     def on_drop(self, target, value, x, y):
-        paths = [file.get_path() for file in value.get_files() if file.get_path()]
+        from .documents import DRAG_FOLDER
+        # Our own dragged thumbnails also carry a PDF file: ignore that here.
+        paths = [file.get_path() for file in value.get_files()
+                 if file.get_path() and Path(file.get_path()).parent != DRAG_FOLDER]
         if paths:
             self.get_application().open_paths(paths, self if self.doc is None else None)
             return True
@@ -1128,6 +1134,37 @@ class PrevuxWindow(Adw.ApplicationWindow):
         doc.insert_blank_page(self.view.current_page + 1)
         self.after_edit(structure=True)
         self.go_page(self.view.current_page + 1)
+
+    def insert_from_file(self):
+        """Like Preview's Edit → Insert → Page from File: all pages after the current one."""
+        doc = self.doc
+        if doc is None or doc.kind != "pdf":
+            return
+        dialog = Gtk.FileDialog(title=_("Insert Pages from File…"))
+        supported = Gtk.FileFilter(name=_("All Supported Documents"))
+        for suffix in sorted(IMAGE_EXTENSIONS | PDF_EXTENSIONS | TEXT_EXTENSIONS | BOOK_EXTENSIONS):
+            supported.add_suffix(suffix[1:])
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(supported)
+        dialog.set_filters(filters)
+
+        def chosen(dialog, result):
+            try:
+                path = dialog.open_finish(result).get_path()
+            except GLib.Error:
+                return
+            try:
+                source = open_document(path)
+            except Exception as error:
+                self.show_error(_("“{name}” could not be opened.").format(name=Path(path).name), str(error))
+                return
+            at = self.view.current_page + 1
+            doc.checkpoint(structure=True)
+            for offset in range(source.page_count):
+                doc.insert_page_from(source, offset, at + offset)
+            self.after_edit(structure=True)
+            self.go_page(at)
+        dialog.open(self, None, chosen)
 
     def delete_pages(self):
         doc = self.doc
