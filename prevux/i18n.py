@@ -83,6 +83,7 @@ GERMAN = {
     "Highlight Color": "Farbe zum Hervorheben",
     "Highlight Text": "Text hervorheben",
     "Images and PDFs": "Bilder und PDFs",
+    "All Supported Documents": "Alle unterstützten Dokumente",
     "{index} of {count} documents": "Dokument {index} von {count}",
     "Indigo": "Indigo",
     "Insert Blank Page": "Leere Seite einfügen",

@@ -34,6 +34,9 @@ IMAGE_EXTENSIONS = {
 }
 
 PDF_EXTENSIONS = {".pdf"}
+# Shown as pages (converted on opening; saving exports a PDF, the original stays untouched).
+TEXT_EXTENSIONS = {".md", ".markdown", ".mdown", ".mkd", ".txt", ".text", ".html", ".htm"}
+BOOK_EXTENSIONS = {".epub", ".mobi", ".fb2", ".cbz", ".xps", ".oxps", ".svg"}
 
 PREVUX_KEY = "PrevuxData"
 
@@ -42,6 +45,10 @@ def open_document(path):
     suffix = Path(path).suffix.lower()
     if suffix in PDF_EXTENSIONS:
         return PDFDocument(path)
+    if suffix in TEXT_EXTENSIONS:
+        return ConvertedDocument(path, text_to_pdf(path))
+    if suffix in BOOK_EXTENSIONS:
+        return ConvertedDocument(path, book_to_pdf(path))
     if suffix in IMAGE_EXTENSIONS:
         return ImageDocument(path)
 
@@ -373,9 +380,9 @@ class PDFDocument(BaseDocument):
 
     kind = "pdf"
 
-    def __init__(self, path, password=None):
+    def __init__(self, path, password=None, data=None):
         super().__init__(path)
-        self.doc = pymupdf.open(path)
+        self.doc = pymupdf.open("pdf", data) if data is not None else pymupdf.open(path)
         if self.doc.needs_pass and not self.doc.authenticate(password or ""):
             raise PermissionError("password")
         self.annotations = [self.import_annotations(page) for page in self.doc]
@@ -1052,3 +1059,78 @@ def foreign_annotation(annot, matrix):
 
     return None
 
+
+
+# --- other formats shown as pages --------------------------------------
+
+class ConvertedDocument(PDFDocument):
+    """Markdown, text, HTML, e-books …: laid out as PDF pages for viewing and marking up.
+    Saving never writes into the original file – it is exported as a PDF."""
+
+    converted = True
+
+    def __init__(self, path, data):
+        super().__init__(path, data=data)
+
+
+PAGE_CSS = """
+* { font-family: sans-serif; }
+body { font-size: 11pt; line-height: 1.45; color: #1d1d1f; }
+h1 { font-size: 22pt; margin: 0 0 10pt 0; }
+h2 { font-size: 16pt; margin: 16pt 0 6pt 0; }
+h3 { font-size: 13pt; margin: 12pt 0 4pt 0; }
+h4, h5, h6 { font-size: 11pt; margin: 10pt 0 4pt 0; }
+p { margin: 0 0 7pt 0; }
+ul, ol { margin: 0 0 7pt 0; }
+li { margin: 0 0 2pt 0; }
+code { font-family: monospace; font-size: 9.5pt; background-color: #f2f2f6; }
+pre { font-family: monospace; font-size: 9.5pt; background-color: #f2f2f6; padding: 6pt; white-space: pre-wrap; }
+blockquote { color: #6e6e73; margin: 0 0 7pt 0; padding-left: 10pt; border-left: 2pt solid #d2d2d7; }
+table { border-collapse: collapse; margin: 0 0 8pt 0; }
+th, td { border: 0.6pt solid #c7c7cc; padding: 3pt 6pt; }
+th { background-color: #f2f2f6; }
+a { color: #0066cc; }
+hr { border: 0; border-top: 0.6pt solid #c7c7cc; }
+"""
+
+
+def text_to_pdf(path, paper="a4"):
+    """Markdown, plain text or HTML as A4 pages (PDF bytes)."""
+    import html
+    path = Path(path)
+    raw = path.read_bytes()
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        text = raw.decode("latin-1")
+    suffix = path.suffix.lower()
+    if suffix in (".html", ".htm"):
+        body = text
+    elif suffix in (".txt", ".text"):
+        body = "<pre style='background-color: transparent; padding: 0; font-size: 10pt'>" + html.escape(text) + "</pre>"
+    else:
+        # CommonMark (as on GitHub) with tables and strikethrough.
+        from markdown_it import MarkdownIt
+        body = MarkdownIt("commonmark", {"html": True}).enable(["table", "strikethrough"]).render(text)
+    story = pymupdf.Story(html=body, user_css=PAGE_CSS, archive=pymupdf.Archive(str(path.parent)))
+    buffer = io.BytesIO()
+    writer = pymupdf.DocumentWriter(buffer)
+    mediabox = pymupdf.paper_rect(paper)
+    where = mediabox + (56, 56, -56, -56)
+    more = True
+    while more:
+        device = writer.begin_page(mediabox)
+        more, _filled = story.place(where)
+        story.draw(device)
+        writer.end_page()
+    writer.close()
+    return buffer.getvalue()
+
+
+def book_to_pdf(path):
+    """E-books, comics, XPS and SVG through MuPDF, as PDF bytes."""
+    source = pymupdf.open(str(path))
+    try:
+        return source.convert_to_pdf()
+    finally:
+        source.close()
