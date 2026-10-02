@@ -21,6 +21,8 @@ from .documents import (
     ImageDocument,
     PDFDocument,
     duplicate,
+    is_locked,
+    set_locked,
     pil_to_surface,
     open_document,
 )
@@ -376,6 +378,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
                     (_("Rename…"), "win.rename"),
                     (_("Move To…"), "win.move-to"),
                     (_("Revert To…"), "win.revert"),
+                    (_("Lock"), "win.lock"),
                     (_("Export…"), "win.export", "<Control><Shift>s"),
                     (_("Export as PDF…"), "win.export-pdf"),
                     (_("Export with Filter…"), "win.export-filtered"),
@@ -594,6 +597,11 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.add_action(mode)
         self.actions["display-mode"] = mode
 
+        lock = Gio.SimpleAction.new_stateful("lock", None, GLib.Variant.new_boolean(False))
+        lock.connect("activate", lambda action, _param: self.set_lock(not action.get_state().get_boolean()))
+        self.add_action(lock)
+        self.actions["lock"] = lock
+
         # Checked while the current page is bookmarked; choosing it again removes the bookmark.
         bookmark = Gio.SimpleAction.new_stateful("bookmark", None, GLib.Variant.new_boolean(False))
         bookmark.connect("activate", lambda action, _param: self.set_bookmark(
@@ -635,6 +643,8 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.enable("rename", on_disk)
         self.enable("move-to", on_disk)
         self.enable("revert", on_disk)
+        self.enable("lock", on_disk)
+        self.actions["lock"].set_state(GLib.Variant.new_boolean(bool(has_doc and doc.locked)))
         several = len(self.documents) > 1
         for name in ("next-tab", "previous-tab", "move-tab-to-window"):
             self.enable(name, several)
@@ -685,7 +695,9 @@ class PrevuxWindow(Adw.ApplicationWindow):
             return
 
         title = doc.name
-        if doc.modified:
+        if doc.locked:
+            title += " — " + _("Locked")
+        elif doc.modified:
             title += " — " + _("Edited")
         self.title_label.set_text(title)
         self.set_title(title)
@@ -828,7 +840,14 @@ class PrevuxWindow(Adw.ApplicationWindow):
         if opened:
             self.add_documents(opened)
 
+    def watch_lock(self, doc):
+        on_disk = not getattr(doc, "untitled", False) and not getattr(doc, "converted", False)
+        doc.locked = on_disk and is_locked(doc.path)
+        doc.on_locked_edit = self.on_locked_edit
+
     def add_documents(self, documents):
+        for doc in documents:
+            self.watch_lock(doc)
         self.documents.extend(documents)
         self.sidebar.set_documents(self.documents)
         self.sync_tabs()
@@ -1135,6 +1154,56 @@ class PrevuxWindow(Adw.ApplicationWindow):
     # DUPLICATE, RENAME, MOVE, REVERT
     # ========================================================
 
+    def set_lock(self, locked):
+        doc = self.doc
+        if doc is None:
+            return
+        self.view.finish_editing()
+        if locked and doc.modified:
+            self.toast(_("Save your changes before locking the file."))
+            self.update_state()
+            return
+        try:
+            set_locked(doc.path, locked)
+        except OSError as error:
+            self.show_error(_("The protection could not be changed."), str(error))
+            return
+        doc.locked = is_locked(doc.path)
+        if not locked and doc.locked:
+            self.show_error(_("The file stays write-protected."),
+                            _("It belongs to someone else or lies in a protected folder."))
+        self.update_titles()
+        self.update_state()
+        self.toast(_("Locked") if doc.locked else _("Unlocked"))
+
+    def on_locked_edit(self, doc):
+        """Preview's question when a locked file is about to change."""
+        if getattr(self, "lock_dialog", None) is not None or doc not in self.documents:
+            return False
+        dialog = Adw.AlertDialog(
+            heading=_("“{name}” is locked").format(name=doc.name),
+            body=_("Locked files cannot be changed. Unlock it, or duplicate it and edit the copy."),
+        )
+        dialog.add_response("cancel", _("Cancel"))
+        dialog.add_response("duplicate", _("Duplicate"))
+        dialog.add_response("unlock", _("Unlock"))
+        dialog.set_response_appearance("unlock", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("unlock")
+        dialog.set_close_response("cancel")
+
+        def answered(_dialog, response):
+            self.lock_dialog = None
+            if response == "unlock":
+                self.show_document(self.documents.index(doc))
+                self.set_lock(False)
+            elif response == "duplicate":
+                self.show_document(self.documents.index(doc))
+                self.duplicate_document()
+        dialog.connect("response", answered)
+        self.lock_dialog = dialog
+        dialog.present(self)
+        return False
+
     def duplicate_document(self):
         doc = self.doc
         if doc is None:
@@ -1272,6 +1341,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
         restored.path = doc.path
         restored.modified = is_version          # the saved state is already on disk
         restored.settings_applied = True
+        self.watch_lock(restored)
         index = self.documents.index(doc)
         self.documents[index] = restored
         self.doc_index = -1
@@ -1294,6 +1364,9 @@ class PrevuxWindow(Adw.ApplicationWindow):
             return
         if getattr(doc, "converted", False):
             self.export_dialog(pdf=True, then=then)
+            return
+        if doc.locked:
+            self.on_locked_edit(doc)
             return
         try:
             versions.keep(doc.path)          # the state before this save stays restorable
