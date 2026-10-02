@@ -110,6 +110,8 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.sidebar.connect("page-activated", self.on_page_activated)
         self.sidebar.connect("drop-page", self.on_drop_page)
         self.sidebar.connect("search-activated", self.on_search_result)
+        self.sidebar.connect("bookmark-activated", lambda _sidebar, page: self.go_page(page))
+        self.sidebar.connect("bookmark-removed", lambda _sidebar, page: self.set_bookmark(page, False))
         self.sidebar.connect(
             "outline-activated", lambda _sidebar, page, y: self.view.scroll_to_page(page, y),
         )
@@ -377,6 +379,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
                     (_("Thumbnails"), "win.show-sidebar", "<Control><Alt>2"),
                     (_("Table of Contents"), "win.show-contents", "<Control><Alt>3"),
                     (_("Contact Sheet"), "win.show-sheet", "<Control><Alt>4"),
+                    (_("Bookmarks"), "win.show-bookmarks", "<Control><Alt>5"),
                 ),
                 section(
                     (_("Continuous Scroll"), "win.display-mode::continuous", "<Control>1"),
@@ -423,6 +426,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
                     (_("Flip Vertical"), "win.flip-vertical"),
                     (_("Remove Background"), "win.remove-background", "<Control><Shift>k"),
                 ),
+                section((_("Add Bookmark"), "win.bookmark", "<Control>d")),
                 section(
                     (_("Highlight Text"), "win.highlight", "<Control><Shift>h"),
                     (_("Crop"), "win.crop", "<Control>k"),
@@ -487,6 +491,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
             "show-sidebar": lambda: self.show_sidebar_mode("thumbnails"),
             "show-contents": lambda: self.show_sidebar_mode("contents"),
             "show-sheet": lambda: self.show_sidebar_mode("sheet"),
+            "show-bookmarks": lambda: self.show_sidebar_mode("bookmarks"),
             "zoom-selection": self.zoom_to_selection,
             "zoom-level": self.ask_zoom_level,
             "actual-size": lambda: self.view.set_zoom(settings.actual_size_zoom(self, self.doc)),
@@ -528,6 +533,13 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.add_action(mode)
         self.actions["display-mode"] = mode
 
+        # Checked while the current page is bookmarked; choosing it again removes the bookmark.
+        bookmark = Gio.SimpleAction.new_stateful("bookmark", None, GLib.Variant.new_boolean(False))
+        bookmark.connect("activate", lambda action, _param: self.set_bookmark(
+            self.view.current_page, not action.get_state().get_boolean()))
+        self.add_action(bookmark)
+        self.actions["bookmark"] = bookmark
+
         action = Gio.SimpleAction.new("add-shape", GLib.VariantType.new("s"))
         action.connect("activate", lambda _action, param: self.view.insert_shape(param.get_string()))
         self.add_action(action)
@@ -555,6 +567,9 @@ class PrevuxWindow(Adw.ApplicationWindow):
         self.enable("undo", has_doc and doc.can_undo())
         self.enable("redo", has_doc and doc.can_redo())
         self.enable("find", pdf)
+        bookmarkable = pdf and not getattr(doc, "untitled", False) and doc.path is not None
+        self.enable("bookmark", bookmarkable)
+        self.enable("show-bookmarks", bookmarkable)
         self.enable("highlight", pdf)
         self.enable("insert-blank-page", pdf)
         self.enable("insert-from-file", pdf)
@@ -766,6 +781,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
             self.sidebar.fill_contents(doc)
         self.apply_opening_settings(doc)
         self.start_live_text(doc)
+        self.refresh_bookmarks()
         self.update_state()
 
     def start_live_text(self, doc):
@@ -1090,6 +1106,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
             self.view.document_structure_changed()
             self.sidebar.set_documents(self.documents)
             self.sidebar.select_page(self.doc_index, self.view.current_page)
+            self.refresh_bookmarks()
         else:
             self.sidebar.refresh_document(self.doc_index, [self.view.current_page])
         self.view.refresh()
@@ -1492,6 +1509,50 @@ class PrevuxWindow(Adw.ApplicationWindow):
         page = max(0, min(doc.page_count - 1, page))
         self.view.scroll_to_page(page)
 
+    # ========================================================
+    # BOOKMARKS
+    # ========================================================
+
+    def bookmark_path(self):
+        doc = self.doc
+        if doc is None or doc.kind != "pdf" or getattr(doc, "untitled", False) or doc.path is None:
+            return None
+        return doc.path
+
+    def set_bookmark(self, page, on):
+        path = self.bookmark_path()
+        if path is None:
+            return
+        items = [item for item in settings.bookmarks(path) if item["page"] != page]
+        if on:
+            items.append({"page": page, "added": GLib.get_real_time() / 1e6})
+        settings.set_bookmarks(path, items)
+        self.refresh_bookmarks()
+        self.toast(_("Bookmark added") if on else _("Bookmark removed"))
+
+    def refresh_bookmarks(self):
+        """Sidebar list, page ribbons and the menu checkmark from the stored bookmarks."""
+        path = self.bookmark_path()
+        doc = self.doc
+        items = [item for item in settings.bookmarks(path) if item["page"] < doc.page_count] if path else []
+        outline = doc.outline() if path else []
+        rows = []
+        for item in items:
+            chapters = [title for _level, title, page, _y in outline if page <= item["page"]]
+            added = GLib.DateTime.new_from_unix_local(int(item.get("added", 0)))
+            subtitle = chapters[-1] if chapters else added.format("%d.%m.%Y, %H:%M")
+            rows.append((item["page"], _("Page {page}").format(page=item["page"] + 1), subtitle))
+        self.sidebar.set_bookmarks(rows)
+        self.view.bookmarks = {item["page"] for item in items}
+        self.view.queue_draw()
+        self.update_bookmark_state()
+
+    def update_bookmark_state(self):
+        action = self.actions.get("bookmark")
+        if action is not None:
+            marked = self.view.current_page in getattr(self.view, "bookmarks", ())
+            action.set_state(GLib.Variant.new_boolean(marked))
+
     def on_view_page_changed(self, view, page):
         doc = self.doc
         if doc is not None and doc.kind == "pdf" and not getattr(doc, "untitled", False):
@@ -1501,6 +1562,7 @@ class PrevuxWindow(Adw.ApplicationWindow):
             self.page_memory_source = GLib.timeout_add(800, self.remember_page, doc.path, page)
         self.sidebar.select_page(self.doc_index, page)
         self.update_titles()
+        self.update_bookmark_state()
 
     def on_page_activated(self, sidebar, doc_index, page):
         if doc_index != self.doc_index:

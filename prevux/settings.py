@@ -61,6 +61,21 @@ def remember_page(path, page):
     put("last_pages", pages)
 
 
+def bookmarks(path):
+    """Bookmarked pages of a document, oldest first: [{"page": 0, "added": 1790000000.0}, …].
+    Like Preview, bookmarks belong to you, not to the file – it stays unchanged."""
+    return list((_load().get("bookmarks") or {}).get(str(path), []))
+
+
+def set_bookmarks(path, items):
+    marks = dict(_load().get("bookmarks") or {})
+    if items:
+        marks[str(path)] = sorted(items, key=lambda item: item["page"])
+    else:
+        marks.pop(str(path), None)
+    put("bookmarks", marks)
+
+
 def apply_background():
     """The colour behind the pages (Preview: Settings → General → Window background)."""
     global _provider
