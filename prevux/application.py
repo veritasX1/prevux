@@ -61,6 +61,18 @@ ACCELERATORS = {
 }
 
 
+def _quiet_locked(hook):
+    """Edits stopped because the file is protected are expected, not errors."""
+    def handle(kind, value, trace):
+        from .documents import DocumentLocked
+        if not issubclass(kind, DocumentLocked):
+            hook(kind, value, trace)
+    return handle
+
+
+sys.excepthook = _quiet_locked(sys.excepthook)
+
+
 class PrevuxApplication(Adw.Application):
 
     def __init__(self):

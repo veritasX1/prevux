@@ -127,6 +127,25 @@ def rotate_point_function(degrees, width, height):
 # BASE
 # ============================================================
 
+class DocumentLocked(Exception):
+    """An edit was attempted on a protected file; the window asks what to do."""
+
+
+def is_locked(path):
+    """Protected (Preview: File → Lock): the file may not be written."""
+    return os.path.exists(path) and not os.access(path, os.W_OK)
+
+
+def set_locked(path, locked):
+    """Lock = take away the write permission (for everyone); unlock = give it back to the owner."""
+    import stat
+    mode = os.stat(path).st_mode
+    if locked:
+        os.chmod(path, mode & ~(stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH))
+    else:
+        os.chmod(path, mode | stat.S_IWUSR)
+
+
 class Snapshot:
 
     def __init__(self, annotations, data=None):
@@ -173,7 +192,14 @@ class BaseDocument:
             self.structure_data() if structure else None,
         )
 
+    locked = False
+    on_locked_edit = None        # set by the window: asks to unlock or duplicate
+
     def checkpoint(self, structure=False):
+        if self.locked:
+            if self.on_locked_edit is not None:
+                GLib.idle_add(lambda: self.on_locked_edit(self) and False)
+            raise DocumentLocked(self.path)
         self.undo_stack.append(self.snapshot(structure))
         del self.undo_stack[:-100]
         self.redo_stack.clear()
