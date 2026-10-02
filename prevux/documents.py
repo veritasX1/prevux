@@ -304,10 +304,25 @@ class ImageDocument(BaseDocument):
         return max(2.0, min(self.image.size) / 250)
 
     def structure_data(self):
-        return self.image.copy()
+        return (self.image.copy(), self.dpi)
 
     def restore_structure(self, data):
-        self.image = data
+        self.image, self.dpi = data
+
+    def resolution(self):
+        """Pixels per inch stored in the file (72 if it says nothing, as Preview assumes)."""
+        dpi = self.dpi
+        if isinstance(dpi, (tuple, list)):
+            dpi = dpi[0]
+        try:
+            return float(dpi) if dpi and float(dpi) > 1 else 72.0
+        except (TypeError, ValueError):
+            return 72.0
+
+    def set_resolution(self, dpi):
+        """Change only the print size: the pixels stay as they are (Resample off)."""
+        self.dpi = (round(dpi, 2), round(dpi, 2))
+        self.changed()
 
     # --- editing ----------------------------------------------
 
