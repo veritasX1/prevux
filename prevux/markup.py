@@ -10,7 +10,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("PangoCairo", "1.0")
 
-from gi.repository import Adw, Gdk, GLib, Graphene, Gtk, PangoCairo
+from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gtk, PangoCairo
 
 from .i18n import _
 from .icons import TOOLBAR, Icon, Swatch, icon_button, icon_menu_button
@@ -724,27 +724,28 @@ def save_signatures(signatures):
 
 
 class SignatureDialog(Adw.Dialog):
-    """Draw a signature with mouse, touchpad or pen."""
+    """Create a signature – draw it, or take it from a photo (like Preview: Trackpad | Camera)."""
 
     def __init__(self, toolbar):
         super().__init__()
         self.toolbar = toolbar
         self.strokes = []
+        self.photo_strokes = []
         self.set_title(_("Create Signature"))
-        self.set_content_width(520)
+        self.set_content_width(560)
 
         view = Adw.ToolbarView()
         header = Adw.HeaderBar()
+        self.stack = Adw.ViewStack()
+        switcher = Adw.ViewSwitcher(stack=self.stack, policy=Adw.ViewSwitcherPolicy.WIDE)
+        header.set_title_widget(switcher)
         view.add_top_bar(header)
 
-        box = popover_box(spacing=12, margin=18)
-        label = Gtk.Label(
-            label=_("Sign on the line using your mouse, touchpad or pen."),
-            wrap=True,
-        )
+        # --- draw ---
+        draw = popover_box(spacing=12, margin=18)
+        label = Gtk.Label(label=_("Sign on the line using your mouse, touchpad or pen."), wrap=True)
         label.add_css_class("dim-label")
-        box.append(label)
-
+        draw.append(label)
         self.area = Gtk.DrawingArea(content_height=200, hexpand=True)
         self.area.add_css_class("signature-pad")
         self.area.set_draw_func(self.draw)
@@ -752,9 +753,31 @@ class SignatureDialog(Adw.Dialog):
         drag.connect("drag-begin", self.on_begin)
         drag.connect("drag-update", self.on_update)
         self.area.add_controller(drag)
-        box.append(self.area)
+        draw.append(self.area)
+        self.stack.add_titled_with_icon(draw, "draw", _("Draw"), "document-edit-symbolic")
 
-        buttons = Gtk.Box(spacing=8, halign=Gtk.Align.END)
+        # --- from a photo ---
+        photo = popover_box(spacing=12, margin=18)
+        hint = Gtk.Label(label=_("Sign on white paper with a dark pen and take a photo of it from above. "
+                                 "Prevux turns the ink into a clean, scalable signature."), wrap=True)
+        hint.add_css_class("dim-label")
+        photo.append(hint)
+        self.photo_area = Gtk.DrawingArea(content_height=200, hexpand=True)
+        self.photo_area.add_css_class("signature-pad")
+        self.photo_area.set_draw_func(self.draw_photo)
+        photo.append(self.photo_area)
+        self.photo_status = Gtk.Label(wrap=True)
+        self.photo_status.add_css_class("dim-label")
+        choose = Gtk.Button(label=_("Choose Photo…"), halign=Gtk.Align.CENTER)
+        choose.add_css_class("pill")
+        choose.connect("clicked", self.on_choose_photo)
+        photo.append(choose)
+        photo.append(self.photo_status)
+        self.stack.add_titled_with_icon(photo, "photo", _("From Photo"), "camera-photo-symbolic")
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.append(self.stack)
+        buttons = Gtk.Box(spacing=8, halign=Gtk.Align.END, margin_start=18, margin_end=18, margin_bottom=18)
         clear = Gtk.Button(label=_("Clear"))
         clear.connect("clicked", self.on_clear)
         buttons.append(clear)
@@ -767,13 +790,15 @@ class SignatureDialog(Adw.Dialog):
         view.set_content(box)
         self.set_child(view)
 
-    def draw(self, area, cr, width, height):
+    def draw_baseline(self, cr, width, height):
         cr.set_source_rgba(0.5, 0.5, 0.5, 0.6)
         cr.set_line_width(1)
         cr.move_to(24, height * 0.72)
         cr.line_to(width - 24, height * 0.72)
         cr.stroke()
 
+    def draw(self, area, cr, width, height):
+        self.draw_baseline(cr, width, height)
         cr.set_source_rgb(0.05, 0.05, 0.1)
         ink = InkAnnotation(self.strokes, Style(stroke=None, width=2.4))
         cr.set_line_width(2.4)
@@ -781,6 +806,57 @@ class SignatureDialog(Adw.Dialog):
         cr.set_line_join(1)
         ink.path(cr)
         cr.stroke()
+
+    def draw_photo(self, area, cr, width, height):
+        self.draw_baseline(cr, width, height)
+        if not self.photo_strokes:
+            return
+        xs = [x for stroke in self.photo_strokes for x, _y in stroke]
+        ys = [y for stroke in self.photo_strokes for _x, y in stroke]
+        w, h = max(xs) - min(xs) or 1, max(ys) - min(ys) or 1
+        scale = min((width - 48) / w, (height - 30) / h)
+        cr.translate((width - w * scale) / 2 - min(xs) * scale, (height - h * scale) / 2 - min(ys) * scale)
+        cr.scale(scale, scale)
+        cr.set_source_rgb(0.05, 0.05, 0.1)
+        cr.set_line_width(2.2)
+        cr.set_line_cap(1)
+        cr.set_line_join(1)
+        InkAnnotation(self.photo_strokes, Style(stroke=None, width=2.2)).path(cr)
+        cr.stroke()
+
+    def on_choose_photo(self, button):
+        dialog = Gtk.FileDialog(title=_("Choose Photo…"))
+        images = Gtk.FileFilter(name=_("Images"))
+        images.add_pixbuf_formats()
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(images)
+        dialog.set_filters(filters)
+        dialog.open(self.toolbar.window, None, self.on_photo_chosen)
+
+    def on_photo_chosen(self, dialog, result):
+        try:
+            path = dialog.open_finish(result).get_path()
+        except GLib.Error:
+            return
+        self.photo_status.set_label(_("Recognizing the signature…"))
+        import threading
+        from .signature_import import NoSignatureFound, signature_from_image
+
+        def work():
+            try:
+                strokes, error = signature_from_image(path), None
+            except NoSignatureFound:
+                strokes, error = [], _("No signature found. Use a dark pen on white paper and good light.")
+            except Exception as problem:
+                strokes, error = [], str(problem)
+            GLib.idle_add(self.show_photo_result, strokes, error)
+        threading.Thread(target=work, daemon=True).start()
+
+    def show_photo_result(self, strokes, error):
+        self.photo_strokes = strokes
+        self.photo_status.set_label(error or _("Looks good? Click Done to add it to your signatures."))
+        self.photo_area.queue_draw()
+        return False
 
     def on_begin(self, gesture, x, y):
         self.start = (x, y)
@@ -795,14 +871,20 @@ class SignatureDialog(Adw.Dialog):
             self.area.queue_draw()
 
     def on_clear(self, button):
-        self.strokes = []
-        self.area.queue_draw()
+        if self.stack.get_visible_child_name() == "photo":
+            self.photo_strokes = []
+            self.photo_status.set_label("")
+            self.photo_area.queue_draw()
+        else:
+            self.strokes = []
+            self.area.queue_draw()
 
     def on_done(self, button):
-        if self.strokes:
+        strokes = self.photo_strokes if self.stack.get_visible_child_name() == "photo" else self.strokes
+        if strokes:
             signatures = load_signatures()
-            signatures.insert(0, self.strokes)
+            signatures.insert(0, strokes)
             save_signatures(signatures)
-            self.toolbar.on_signature(None, self.strokes)
+            self.toolbar.on_signature(None, strokes)
         self.close()
 
