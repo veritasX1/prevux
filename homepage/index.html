@@ -2,305 +2,248 @@
 <html lang="de">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Prevux – Bilder und PDFs wie auf dem Mac</title>
-<meta name="description" content="Prevux ist ein Bild- und PDF-Betrachter für Linux nach dem Vorbild von Vorschau auf dem Mac – quelloffen, ohne Konto und ganz ohne Internetverbindung.">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Prevux – Bilder und PDFs, wie du sie vom Mac kennst</title>
+<meta name="description" content="Prevux ist ein Bild- und PDF-Programm für Linux nach dem Vorbild von Vorschau auf dem Mac: ansehen, markieren, unterschreiben, ausfüllen. Quelloffen, ohne Konto und ganz ohne Internetverbindung.">
 <link rel="icon" href="prevux.svg" type="image/svg+xml">
-<style>
-  :root {
-    --bg: #f5f5f7;
-    --surface: #ffffff;
-    --text: #1d1d1f;
-    --muted: #6e6e73;
-    --line: #d2d2d7;
-    --accent: #2b6fe0;
-    --accent-soft: #e8f0fd;
-    --code: #eef0f3;
-    --shadow: 0 18px 50px rgba(0, 0, 0, .14), 0 2px 8px rgba(0, 0, 0, .08);
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #161618;
-      --surface: #1f1f22;
-      --text: #f2f2f4;
-      --muted: #a1a1a6;
-      --line: #38383c;
-      --accent: #5aa9ff;
-      --accent-soft: #1b2a40;
-      --code: #2a2a2e;
-      --shadow: 0 18px 50px rgba(0, 0, 0, .5), 0 2px 8px rgba(0, 0, 0, .4);
-    }
-  }
-  * { box-sizing: border-box; }
-  html { -webkit-text-size-adjust: 100%; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font-family: system-ui, -apple-system, "Segoe UI", "Ubuntu Sans", "Cantarell", "Noto Sans", sans-serif;
-    font-size: 17px;
-    line-height: 1.55;
-  }
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 16px; }
-
-  nav {
-    position: sticky; top: 0; z-index: 2;
-    background: color-mix(in srgb, var(--bg) 82%, transparent);
-    backdrop-filter: saturate(180%) blur(16px);
-    border-bottom: 1px solid var(--line);
-  }
-  nav .wrap { display: flex; align-items: center; gap: 22px; height: 52px; }
-  nav .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; color: var(--text); margin-right: auto; }
-  nav .brand img { width: 26px; height: 26px; }
-  nav a.link { color: var(--text); font-size: 15px; opacity: .8; }
-  @media (max-width: 640px) {
-    nav a.link.optional { display: none; }
-    nav .wrap { gap: 16px; }
-  }
-
-  header.hero { text-align: center; padding: 72px 0 40px; }
-  .hero img.icon { width: 112px; height: 112px; }
-  .hero h1 { font-size: clamp(40px, 7vw, 64px); line-height: 1.05; margin: 18px 0 12px; letter-spacing: -.02em; }
-  .hero p.lead { font-size: clamp(19px, 2.6vw, 24px); color: var(--muted); max-width: 720px; margin: 0 auto; }
-  .badge {
-    display: inline-block; margin-top: 22px; padding: 5px 14px;
-    border-radius: 99px; background: var(--accent-soft); color: var(--accent);
-    font-size: 14px; font-weight: 600;
-  }
-  .actions { margin-top: 28px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
-  .button {
-    display: inline-block; padding: 12px 24px; border-radius: 99px;
-    font-weight: 600; font-size: 16px;
-  }
-  .button.primary { background: #2b6fe0; color: #fff; }
-  .button.secondary { border: 1px solid var(--line); color: var(--text); background: var(--surface); }
-  .button:hover { text-decoration: none; filter: brightness(1.05); }
-
-  figure.shot { margin: 48px auto 0; max-width: 1000px; }
-  figure.shot img, .gallery img {
-    width: 100%; height: auto; display: block;
-    border-radius: 12px; box-shadow: var(--shadow);
-  }
-
-  section { padding: 72px 0; }
-  section + section { border-top: 1px solid var(--line); }
-  h2 { font-size: clamp(30px, 4.5vw, 42px); line-height: 1.15; margin: 0 0 16px; letter-spacing: -.01em; text-align: center; }
-  .intro { color: var(--muted); font-size: 19px; max-width: 760px; margin: 0 auto 40px; text-align: center; }
-  .prose { max-width: 760px; margin: 0 auto; }
-
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 18px; }
-  .card {
-    background: var(--surface); border: 1px solid var(--line);
-    border-radius: 16px; padding: 22px 22px 18px;
-  }
-  .card h3 { margin: 0 0 6px; font-size: 19px; }
-  .card p { margin: 0; color: var(--muted); font-size: 16px; }
-  .card .symbol {
-    width: 38px; height: 38px; border-radius: 10px; margin-bottom: 14px;
-    display: grid; place-items: center; background: var(--accent-soft); color: var(--accent);
-  }
-  .card .symbol svg { width: 22px; height: 22px; }
-
-  .privacy .card { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
-  .privacy .grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
-
-  .gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 32px; }
-  .gallery figure { margin: 0; }
-  .gallery figcaption { text-align: center; color: var(--muted); font-size: 15px; margin-top: 12px; }
-
-  pre {
-    background: var(--code); border-radius: 12px; padding: 16px 18px;
-    overflow-x: auto; font-size: 14.5px; line-height: 1.5;
-  }
-  code { font-family: ui-monospace, "Ubuntu Mono", "DejaVu Sans Mono", monospace; }
-  p code, li code { background: var(--code); padding: 1px 6px; border-radius: 6px; font-size: .92em; }
-
-  table { width: 100%; border-collapse: collapse; font-size: 16px; }
-  td { padding: 9px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
-  td:last-child { text-align: right; white-space: nowrap; }
-  kbd {
-    font-family: inherit; font-size: 13px; padding: 2px 7px; border-radius: 6px;
-    border: 1px solid var(--line); background: var(--surface);
-  }
-
-  .beta {
-    max-width: 760px; margin: 0 auto; background: var(--surface);
-    border: 1px solid var(--line); border-radius: 16px; padding: 24px 26px;
-  }
-  .beta ul { margin: 10px 0 0; padding-left: 20px; }
-
-  footer { padding: 40px 0 60px; color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); }
-  footer .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 28px; }
-  footer h4 { color: var(--text); margin: 0 0 6px; font-size: 15px; }
-  footer p { margin: 0 0 8px; }
-</style>
+<link rel="stylesheet" href="site.css">
 </head>
 <body>
 
-<nav>
+<div class="apps">
+  <div class="wrap">
+    <a href="https://linotes.goip.de/">LiNotes</a>
+    <a href="https://prevux.goip.de/" aria-current="page">Prevux</a>
+  </div>
+</div>
+
+<header class="nav">
   <div class="wrap">
     <a class="brand" href="#"><img src="prevux.svg" alt="">Prevux</a>
-    <a class="link optional" href="#idee">Idee</a>
-    <a class="link" href="#datenschutz">Datenschutz</a>
-    <a class="link optional" href="#funktionen">Funktionen</a>
-    <a class="link" href="#installation">Installation</a>
-    <a class="link optional" href="https://github.com/veritasX1/prevux">GitHub</a>
-  </div>
-</nav>
-
-<header class="hero">
-  <div class="wrap">
-    <img class="icon" src="prevux.svg" alt="Prevux-Symbol">
-    <h1>Prevux</h1>
-    <p class="lead">Bilder und PDFs ansehen, markieren, unterschreiben und ausfüllen – so vertraut wie Vorschau auf dem Mac, jetzt auf Linux.</p>
-    <span class="badge">Version 0.9 Beta · kostenlos · gemeinfrei (CC0)</span>
-    <div class="actions">
-      <a class="button primary" href="#installation">Prevux installieren</a>
-      <a class="button secondary" href="https://github.com/veritasX1/prevux">Quellcode auf GitHub</a>
-    </div>
-    <figure class="shot">
-      <img src="prevux-markup.webp" width="1280" height="800" alt="Prevux mit eingeblendeter Markierungs-Symbolleiste: ein PDF mit Textmarker, Kreis, Pfeil und Text">
-    </figure>
+    <nav class="links">
+      <a href="#markieren">Markieren</a>
+      <a href="#seitenleiste">Seitenleiste</a>
+      <a href="#neu">Funktionen</a>
+      <a href="#datenschutz">Datenschutz</a>
+      <a href="https://github.com/veritasX1/prevux">GitHub</a>
+    </nav>
+    <a class="btn small cta" href="#installieren">Installieren</a>
   </div>
 </header>
 
-<section id="idee">
-  <div class="wrap prose">
-    <h2>Eine Brücke vom Mac</h2>
-    <p class="intro">Vorschau ist eines der unscheinbarsten Programme auf dem Mac – und eines, das man sofort vermisst, wenn es fehlt.</p>
-    <p>Mit Vorschau öffnet man Bilder und PDFs in Sekunden, markiert Text, unterschreibt Verträge, füllt Formulare aus, schneidet Bilder zu und sortiert Seiten um. Ohne Konto, ohne Abo, ohne Werbung. Für viele Menschen ist genau das ein echter Grund, bei macOS zu bleiben.</p>
-    <p>Prevux will diesen Grund beseitigen. Es übernimmt Aufbau, Werkzeuge, Tastenkürzel und sogar die Menübegriffe von Vorschau – „Ablage“, „Sichern“, „Beschneiden“ –, damit sich der Umstieg auf Linux nicht wie ein Neuanfang anfühlt, sondern wie ein Umzug in eine neue Wohnung, in der die Möbel schon am gewohnten Platz stehen. Die Gestaltung orientiert sich an Apples Human Interface Guidelines, wo sie zu einem Linux-Desktop passen. Alle Symbole sind eigene Entwürfe, und Prevux verwendet die Schriften deines Systems.</p>
-  </div>
-</section>
+<main>
 
-<section id="datenschutz" class="privacy">
+<!-- HERO -->
+<section class="hero">
   <div class="wrap">
-    <h2>Deine Dokumente bleiben deine</h2>
-    <p class="intro">Verträge, Ausweise, Kontoauszüge, Arztbriefe: Was man in einem PDF-Programm öffnet, ist oft das Privateste überhaupt. Prevux ist deshalb von Grund auf so gebaut, dass nichts deinen Rechner verlässt.</p>
-    <div class="grid">
-      <div class="card">
-        <div class="symbol"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 8.5a15 15 0 0 1 20 0M5.5 12a10 10 0 0 1 13 0M9 15.5a5 5 0 0 1 6 0"/><circle cx="12" cy="19" r="1" fill="currentColor"/><path d="M3 3l18 18"/></svg></div>
-        <h3>Kein Internet</h3>
-        <p>Prevux enthält keinen Code, der eine Verbindung ins Netz aufbaut. Keine Telemetrie, keine Statistiken, keine Absturzberichte, keine Update-Abfragen.</p>
-      </div>
-      <div class="card">
-        <div class="symbol"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/><path d="M3 3l18 18"/></svg></div>
-        <h3>Kein Konto, keine Cloud</h3>
-        <p>Keine Anmeldung, kein Abo, keine Synchronisierung. Deine Dateien werden nur dort gelesen und gespeichert, wo du es willst.</p>
-      </div>
-      <div class="card">
-        <div class="symbol"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
-        <h3>Fast nichts gespeichert</h3>
-        <p>Außer deinen Dokumenten merkt sich Prevux nur deine Unterschriften – in einer Datei, die nur du lesen kannst – und trägt geöffnete Dateien in die übliche Liste „Zuletzt verwendet“ ein.</p>
-      </div>
-      <div class="card">
-        <div class="symbol"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="9" width="18" height="6" rx="1.5" fill="currentColor"/><path d="M3 5h10M3 19h14"/></svg></div>
-        <h3>Schwärzen heißt löschen</h3>
-        <p>Geschwärzter Text, Grafiken und Bildpunkte werden beim Sichern wirklich aus dem PDF entfernt – nicht nur mit einem schwarzen Balken überdeckt.</p>
-      </div>
-      <div class="card">
-        <div class="symbol"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg></div>
-        <h3>Offener Quellcode</h3>
-        <p>Jede Zeile von Prevux ist auf GitHub einsehbar. Du musst niemandem vertrauen – du kannst nachsehen.</p>
-      </div>
-      <div class="card">
-        <div class="symbol"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg></div>
-        <h3>Auch diese Seite</h3>
-        <p>Keine Cookies, kein JavaScript, keine Statistik, keine eingebundenen Schriften oder Dienste von Dritten. Der Server führt für diese Seite keine Zugriffsprotokolle.</p>
+    <img class="app-icon" src="prevux.svg" alt="Prevux-Symbol" width="120" height="120">
+    <span class="badge reveal">Neu: Tabs, Glas-Symbolleiste, Diashow und vieles mehr</span>
+    <h1 class="display reveal d1">Bilder und PDFs.<br><span class="gradient-text">Wie vom Mac gewohnt.</span></h1>
+    <p class="lead reveal d2">Ansehen, markieren, unterschreiben und ausfüllen – so vertraut wie Vorschau auf dem Mac.<br>Jetzt auf Linux. Kostenlos, quelloffen und ganz ohne Internet.</p>
+    <div class="actions reveal d3">
+      <a class="btn" href="#installieren">Kostenlos installieren</a>
+      <a class="btn ghost" href="#neu">Alle Funktionen</a>
+    </div>
+    <div class="hero-stage reveal">
+      <div class="window">
+        <img class="zoomable" src="img/hero.webp" data-light="img/hero.webp" data-dark="img/hero-dark.webp" width="1280" height="800" alt="Prevux mit drei Dokumenten in Tabs: ein Wanderführer als PDF mit Markierungs-Symbolleiste, Textmarker, Kreis, Pfeil und Beschriftung auf einem Foto">
       </div>
     </div>
   </div>
 </section>
 
-<section id="funktionen">
+<section class="wrap center" style="padding-top: 40px; max-width: 1000px">
+  <p class="headline reveal">Ein Umzug.<br><span style="color: var(--muted)">Kein Neuanfang.</span></p>
+  <p class="lead reveal d1">Prevux übernimmt Aufbau, Werkzeuge, Tastenkürzel und sogar die Menübegriffe von Vorschau – „Ablage“, „Sichern“, „Beschneiden“. Wer vom Mac kommt, findet alles dort, wo die Hand es sucht. Und wer Vorschau nie benutzt hat, bekommt einfach ein ruhiges, aufgeräumtes Programm für Bilder und PDFs.</p>
+</section>
+
+<!-- STORY -->
+<section id="markieren" class="alt">
   <div class="wrap">
-    <h2>Alles, was du von Vorschau kennst</h2>
-    <p class="intro">Die Werkzeuge sitzen dort, wo du sie suchst, und heißen so, wie du es gewohnt bist.</p>
-    <div class="grid">
-      <div class="card"><h3>Markierungen</h3><p>Skizzieren mit Formerkennung, Formen, Pfeile, Sprechblasen, Lupe, Hervorheben, Textfelder und Notizen – alles später noch bearbeitbar.</p></div>
-      <div class="card"><h3>Text hervorheben</h3><p>Textmarker in mehreren Farben, Unterstreichen und Durchstreichen – gespeichert als normale PDF-Anmerkungen, die jedes Programm anzeigt.</p></div>
-      <div class="card"><h3>Unterschreiben</h3><p>Unterschrift einmal mit Maus, Touchpad oder Stift zeichnen und mit einem Klick in jedes Dokument einsetzen.</p></div>
-      <div class="card"><h3>Formulare ausfüllen</h3><p>Textfelder, Ankreuzfelder, Optionen und Auswahllisten direkt im PDF ausfüllen, mit Tab zum nächsten Feld.</p></div>
-      <div class="card"><h3>Seiten verwalten</h3><p>Seiten drehen, umsortieren, löschen, leere Seiten einfügen und per Ziehen zwischen PDFs kopieren.</p></div>
-      <div class="card"><h3>Bilder bearbeiten</h3><p>Beschneiden, drehen, spiegeln, Größe und Farbe anpassen – mit Widerrufen für jeden Schritt.</p></div>
-      <div class="card"><h3>Suchen und finden</h3><p>Volltextsuche mit Trefferliste in der Seitenleiste, Inhaltsverzeichnis und Miniaturen.</p></div>
-      <div class="card"><h3>Hell und dunkel</h3><p>Prevux folgt dem Erscheinungsbild deines Systems und fühlt sich auf GNOME wie zu Hause an.</p></div>
+    <div class="section-head reveal">
+      <p class="eyebrow">Bearbeiten</p>
+      <h2 class="headline">Zeigen,<br>worauf es ankommt.</h2>
+      <p class="lead">Markieren, ausfüllen, unterschreiben, anpassen – ohne ein zweites Programm.</p>
+    </div>
+    <div class="story">
+      <div class="steps">
+        <div class="step">
+          <h3>Formen, Pfeile, Text.<br>Und eine Lupe.</h3>
+          <p>Auf Fotos wie auf PDFs. Die Lupe vergrößert eine Stelle und zeigt mit einer Linie, woher sie stammt. Alles bleibt bearbeitbar, auch nach dem Sichern.</p>
+          <div class="mobile-shot window"><img src="img/image.webp" data-light="img/image.webp" data-dark="img/image-dark.webp" alt="Foto mit Kreis, Pfeil, Beschriftung und Lupe" loading="lazy"></div>
+        </div>
+        <div class="step">
+          <h3>Skizzieren, das<br>schön wird.</h3>
+          <p>Ein krummer Kreis wird ein sauberer Kreis, ein zittriger Pfeil ein gerader. Mit Grafiktablett oder Stift wird die Linie dicker, je fester du drückst.</p>
+          <div class="mobile-shot window"><img src="img/hero.webp" data-light="img/hero.webp" data-dark="img/hero-dark.webp" alt="PDF mit Textmarker, Kreis und Pfeil" loading="lazy"></div>
+        </div>
+        <div class="step">
+          <h3>Die Seite fließt unter<br>der Leiste weiter.</h3>
+          <p>Die Symbolleiste ist aus Glas: Beim Scrollen schimmert das Dokument weich darunter durch. Zoomen und Scrollen gleiten sanft dorthin, wo dein Mauszeiger steht. Lieber schlicht? „Transparenz reduzieren“ in den Einstellungen.</p>
+          <div class="mobile-shot window"><img src="img/glass.webp" data-light="img/glass.webp" data-dark="img/glass-dark.webp" alt="Ein Foto scrollt unter die halbtransparente Symbolleiste" loading="lazy"></div>
+        </div>
+        <div class="step" id="formulare">
+          <h3>Ausfüllen. Unterschreiben.<br>Fertig.</h3>
+          <p>Felder, Kästchen und Auswahllisten direkt im PDF, mit Tab zum nächsten Feld. Die Unterschrift zeichnest du – oder du fotografierst sie auf Papier, und Prevux macht saubere Linien daraus.</p>
+          <div class="mobile-shot window"><img src="img/forms.webp" data-light="img/forms.webp" data-dark="img/forms-dark.webp" alt="Ausgefülltes Formular mit Unterschrift" loading="lazy"></div>
+        </div>
+        <div class="step">
+          <h3>Viele Bilder.<br>Eine Größe.</h3>
+          <p>Mehrere Bilder markieren und gemeinsam anpassen: einpassen in gängige Größen, in Pixel, Prozent oder Zentimeter – mit oder ohne Neuberechnung.</p>
+          <div class="mobile-shot window"><img src="img/resize.webp" data-light="img/resize.webp" data-dark="img/resize-dark.webp" alt="Größenkorrektur für drei Bilder gleichzeitig" loading="lazy"></div>
+        </div>
+      </div>
+      <div class="stage">
+        <div class="frames">
+          <div class="window"><img class="zoomable" src="img/image.webp" data-light="img/image.webp" data-dark="img/image-dark.webp" alt="Foto mit Kreis, Pfeil, Beschriftung und Lupe" loading="lazy"></div>
+          <div class="window"><img class="zoomable" src="img/hero.webp" data-light="img/hero.webp" data-dark="img/hero-dark.webp" alt="PDF mit Textmarker, Kreis und Pfeil" loading="lazy"></div>
+          <div class="window"><img class="zoomable" src="img/glass.webp" data-light="img/glass.webp" data-dark="img/glass-dark.webp" alt="Glas-Symbolleiste" loading="lazy"></div>
+          <div class="window"><img class="zoomable" src="img/forms.webp" data-light="img/forms.webp" data-dark="img/forms-dark.webp" alt="Ausgefülltes Formular mit Unterschrift" loading="lazy"></div>
+          <div class="window"><img class="zoomable" src="img/resize.webp" data-light="img/resize.webp" data-dark="img/resize-dark.webp" alt="Größenkorrektur" loading="lazy"></div>
+        </div>
+      </div>
     </div>
   </div>
 </section>
 
-<section id="bilder">
+<!-- SIDEBAR SWITCHER -->
+<section id="seitenleiste">
   <div class="wrap">
-    <h2>So sieht Prevux aus</h2>
-    <p class="intro">Alle Bilder zeigen Beispieldokumente, die eigens für diese Seite erstellt wurden.</p>
-    <div class="gallery">
-      <figure><img src="prevux-search-dark.webp" width="1280" height="800" loading="lazy" alt="Suche mit Trefferliste in der Seitenleiste im dunklen Erscheinungsbild"><figcaption>Suchergebnisse in der Seitenleiste, dunkles Erscheinungsbild</figcaption></figure>
-      <figure><img src="prevux-image.webp" width="1280" height="800" loading="lazy" alt="Ein Landschaftsbild mit Lupe, Kreis, Pfeil und Beschriftung"><figcaption>Lupe, Formen und Text auf einem Foto</figcaption></figure>
-      <figure><img src="prevux-forms.webp" width="1280" height="800" loading="lazy" alt="Ein PDF-Formular wird ausgefüllt"><figcaption>PDF-Formulare direkt ausfüllen</figcaption></figure>
-      <figure><img src="prevux-contents.webp" width="1280" height="800" loading="lazy" alt="Inhaltsverzeichnis eines PDFs in der Seitenleiste"><figcaption>Inhaltsverzeichnis in der Seitenleiste</figcaption></figure>
+    <div class="section-head reveal">
+      <p class="eyebrow">Seitenleiste</p>
+      <h2 class="headline">Immer wissen,<br>wo du bist.</h2>
+      <p class="lead">Miniaturen, Inhaltsverzeichnis, Lesezeichen und Suchergebnisse – ein Klick, und du bist auf der richtigen Seite.</p>
+    </div>
+    <div class="center reveal">
+      <div class="segmented" data-showcase="#side-showcase">
+        <button class="on" data-win="img/hero.webp|img/hero-dark.webp" data-caption="Mehrere Dateien auf einmal geöffnet? Die Seitenleiste zeigt sie alle. Seiten ziehst du per Maus an eine neue Stelle – sogar von einem PDF ins andere.">Miniaturen</button>
+        <button data-win="img/contents.webp|img/contents-dark.webp" data-caption="Das Inhaltsverzeichnis des PDFs, mit Seitenzahlen. Lange Handbücher werden so übersichtlich.">Inhaltsverzeichnis</button>
+        <button data-win="img/search.webp|img/search-dark.webp" data-caption="Jeder Treffer mit dem Satz drumherum. Dank Live Text auch in Fotos und eingescannten Seiten – erkannt auf deinem Rechner.">Suche</button>
+      </div>
+    </div>
+    <div class="showcase duo-wrap reveal" id="side-showcase">
+      <div class="window"><img class="zoomable" data-slot="win" src="img/hero.webp" data-light="img/hero.webp" data-dark="img/hero-dark.webp" alt="Seitenleiste von Prevux" loading="lazy"></div>
+      <p class="caption" data-slot="caption">Mehrere Dateien auf einmal geöffnet? Die Seitenleiste zeigt sie alle. Seiten ziehst du per Maus an eine neue Stelle – sogar von einem PDF ins andere.</p>
     </div>
   </div>
 </section>
 
-<section id="installation">
-  <div class="wrap prose">
-    <h2>Installation</h2>
-    <p class="intro">Prevux braucht GTK 4, libadwaita ab Version 1.8 und Python. Entwickelt und getestet wird es auf Ubuntu 26.04 LTS.</p>
-    <pre><code>sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 git
+<!-- TILES -->
+<section id="neu" class="alt">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow">Funktionen</p>
+      <h2 class="headline">Und so viel mehr.</h2>
+      <p class="lead">Die kleinen Dinge, die Vorschau so nützlich machen – Stück für Stück nachgebaut.</p>
+    </div>
+    <div class="tiles">
+      <div class="tile reveal"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="2.5"/><path d="M3 10h18M8 7V4.5h8V7"/></svg></div><h3>Tabs</h3><p>Viele Dateien in einem Fenster. <kbd>Strg</kbd> <kbd>Tab</kbd> blättert weiter, ein Tab lässt sich in ein eigenes Fenster ziehen.</p></div>
+      <div class="tile reveal d1"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3.5h10v17l-5-3.6-5 3.6z"/></svg></div><h3>Lesezeichen</h3><p>Wichtige Seiten mit <kbd>Strg</kbd> <kbd>D</kbd> merken – sie bleiben, auch wenn du die Datei schließt.</p></div>
+      <div class="tile reveal d2"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M10 8v4l3.5-2zM8 20h8M12 16v4"/></svg></div><h3>Diashow</h3><p>Bilder und Seiten bildschirmfüllend zeigen – mit den Pfeiltasten weiter, mit Esc zurück.</p></div>
+      <div class="tile reveal"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 1 0 2.3-5.6"/><path d="M4 4v3.5h3.5M12 8v4.5l3 2"/></svg></div><h3>Versionen</h3><p>Jedes Sichern legt eine Version an. „Zurücksetzen auf …“ holt einen früheren Stand zurück.</p></div>
+      <div class="tile reveal d1"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="11" height="11" rx="1.5"/><path d="M14 10h7v11H10v-7M17 17l-4-4M13 16v-3h3"/></svg></div><h3>Größenkorrektur</h3><p>Ein Bild oder gleich mehrere: einpassen in gängige Größen, in Pixel, Prozent oder Zentimeter.</p></div>
+      <div class="tile reveal d2"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18l6-6 3 3 3-4 4 7z"/><circle cx="8" cy="7" r="2"/><path d="M14 4l6 6M20 4l-6 6" opacity=".55"/></svg></div><h3>Hintergrund entfernen</h3><p>Ein Klick, und das Motiv steht frei – zum Weiterverwenden als PNG mit Transparenz.</p></div>
+      <div class="tile reveal"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="9" width="18" height="10" rx="2"/><path d="M7 9V5h10v4M7 14h10"/></svg></div><h3>Scanner und Kamera</h3><p>„Vom Scanner importieren“ – auch über das Netzwerk und mit Einzug direkt als PDF. Oder ein Foto mit der Kamera aufnehmen.</p></div>
+      <div class="tile reveal d1"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor" opacity=".35"/></svg></div><h3>Farbprofile</h3><p>Profil zuweisen und Soft-Proof: Sieh vorher, wie dein Bild auf dem Drucker aussehen wird.</p></div>
+      <div class="tile reveal d2"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg></div><h3>Datei schützen</h3><p>Geschützte Dateien lassen sich nicht versehentlich ändern. Duplizieren, Umbenennen und Bewegen direkt aus dem Titel.</p></div>
+      <div class="tile reveal wide"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5h8l4 4v13H6z"/><path d="M14 3.5v4h4M9 12h6M9 15.5h6M9 19h3"/></svg></div><h3>Öffnet mehr als Bilder und PDFs</h3><p>Markdown, Textdateien, HTML-Seiten und E-Books öffnet Prevux als ordentlich gesetztes Dokument – zum Lesen, Markieren und als PDF Sichern. Animierte GIFs zeigt die Seitenleiste Bild für Bild.</p></div>
+      <div class="tile reveal d1"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-6.5-6-6.5-11a6.5 6.5 0 0 1 13 0c0 5-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/></svg></div><h3>Aufnahmeort</h3><p>Zeigt, wo ein Foto entstand – und entfernt den Ort auf Wunsch, bevor du es weitergibst.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- PRIVACY -->
+<section id="datenschutz">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow">Datenschutz</p>
+      <h2 class="headline">Deine Dokumente<br>bleiben deine.</h2>
+      <p class="lead">Verträge, Ausweise, Kontoauszüge, Arztbriefe: Was man in einem PDF-Programm öffnet, ist oft das Privateste überhaupt. Deshalb verlässt bei Prevux nichts deinen Rechner.</p>
+    </div>
+    <div class="facts">
+      <div class="reveal"><div class="num gradient-text">0</div><div class="lbl">Verbindungen ins Internet</div></div>
+      <div class="reveal d1"><div class="num gradient-text">0</div><div class="lbl">Konten, Abos und Clouds</div></div>
+      <div class="reveal d2"><div class="num gradient-text">0</div><div class="lbl">Tracker, Statistik, Werbung</div></div>
+      <div class="reveal d3"><div class="num gradient-text">100 %</div><div class="lbl">offener Quellcode</div></div>
+    </div>
+    <div class="tiles" style="margin-top: 60px">
+      <div class="tile reveal d2"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="9" width="18" height="6" rx="1.5" fill="currentColor"/><path d="M3 5h10M3 19h14"/></svg></div><h3>Schwärzen heißt löschen</h3><p>Geschwärzter Text, Grafiken und Bildpunkte werden beim Sichern wirklich aus dem PDF entfernt – nicht nur mit einem Balken überdeckt.</p></div>
+      <div class="tile reveal"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2M8 10h8M8 14h5"/></svg></div><h3>Live Text bleibt lokal</h3><p>Texterkennung in Fotos und Scans läuft auf deinem Rechner. Kein Bild wird irgendwohin hochgeladen.</p></div>
+      <div class="tile reveal d1"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg></div><h3>Auch diese Seite</h3><p>Keine Cookies, keine Schriften oder Dienste von Dritten, keine Zugriffsprotokolle. Das JavaScript dieser Seite läuft nur in deinem Browser und sendet nichts.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- INSTALL -->
+<section id="installieren" class="alt">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow">Installieren</p>
+      <h2 class="headline">Leg los. Kostenlos.</h2>
+      <p class="lead">Für Ubuntu und andere Linux-Systeme mit GTK 4 und libadwaita ab 1.8.</p>
+    </div>
+    <div class="install">
+      <div class="download reveal">
+        <h3>Ubuntu</h3>
+        <div class="meta">Entwickelt und getestet auf Ubuntu 26.04 LTS</div>
+        <div class="terminal" data-copy="sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 python3-venv git
 git clone https://github.com/veritasX1/prevux.git
 cd prevux
-./install.sh</code></pre>
-    <p>Danach findest du Prevux im Anwendungsmenü und unter „Öffnen mit“. Soll Prevux künftig alle PDFs und Bilder öffnen:</p>
-    <pre><code>xdg-mime default io.github.veritasx1.Prevux.desktop application/pdf image/png image/jpeg image/webp image/tiff image/gif image/bmp</code></pre>
-
-    <h3>Die wichtigsten Tastenkürzel</h3>
-    <p>Wie auf dem Mac – nur mit <kbd>Strg</kbd> statt <kbd>⌘</kbd> und <kbd>Alt</kbd> statt <kbd>⌥</kbd>.</p>
-    <table>
-      <tr><td>Markierungs-Symbolleiste</td><td><kbd>Strg</kbd> <kbd>⇧</kbd> <kbd>A</kbd></td></tr>
-      <tr><td>Links / rechts drehen</td><td><kbd>Strg</kbd> <kbd>L</kbd> / <kbd>Strg</kbd> <kbd>R</kbd></td></tr>
-      <tr><td>Beschneiden</td><td><kbd>Strg</kbd> <kbd>K</kbd></td></tr>
-      <tr><td>Text hervorheben</td><td><kbd>Strg</kbd> <kbd>⇧</kbd> <kbd>H</kbd></td></tr>
-      <tr><td>Originalgröße / ganze Seite</td><td><kbd>Strg</kbd> <kbd>0</kbd> / <kbd>Strg</kbd> <kbd>9</kbd></td></tr>
-      <tr><td>Miniaturen / Inhaltsverzeichnis</td><td><kbd>Strg</kbd> <kbd>Alt</kbd> <kbd>2</kbd> / <kbd>3</kbd></td></tr>
-      <tr><td>Suchen</td><td><kbd>Strg</kbd> <kbd>F</kbd></td></tr>
-    </table>
-  </div>
-</section>
-
-<section id="beta">
-  <div class="wrap">
-    <h2>Warum „Beta“?</h2>
-    <div class="beta">
-      <p>Prevux ist im Alltag voll benutzbar und öffnet auf dem Rechner seines Entwicklers bereits alle PDFs und Bilder. Die Version 0.9 heißt trotzdem Beta, weil die Oberfläche bisher nur auf <b>Deutsch</b> gepflegt ist. Für Version 1.0 geplant sind:</p>
-      <ul>
-        <li>Englisch</li>
-        <li>Französisch</li>
-        <li>Russisch</li>
-      </ul>
-      <p style="margin-top:12px">Fehler gefunden oder eine Idee? Schreib sie gern in den <a href="https://github.com/veritasX1/prevux/issues">Issue-Tracker auf GitHub</a>.</p>
+./install.sh"><div class="bar"><i></i><i></i><i></i><span>Terminal</span></div><pre><span class="p">$</span> sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 python3-venv git
+<span class="p">$</span> git clone https://github.com/veritasX1/prevux.git
+<span class="p">$</span> cd prevux
+<span class="p">$</span> ./install.sh</pre></div>
+        <p>Danach steht Prevux im Anwendungsmenü und unter „Öffnen mit“. Soll es künftig alle PDFs und Bilder öffnen:</p>
+        <div class="terminal" data-copy="xdg-mime default io.github.veritasx1.Prevux.desktop application/pdf image/png image/jpeg image/webp image/tiff image/gif image/bmp"><div class="bar"><i></i><i></i><i></i><span>Terminal</span></div><pre><span class="p">$</span> xdg-mime default io.github.veritasx1.Prevux.desktop application/pdf image/png image/jpeg image/webp image/tiff image/gif image/bmp</pre></div>
+        <p><b>Optional:</b> <code class="inline">tesseract-ocr tesseract-ocr-deu</code> für Live Text, <code class="inline">sane-utils</code> für Scanner.</p>
+        <p class="note">Prevux ist eine <b>Beta</b>: im Alltag voll benutzbar, die Oberfläche gibt es aber bisher nur auf Deutsch. Englisch, Französisch und Russisch folgen mit Version 1.0. Fehler oder Ideen? Gern im <a href="https://github.com/veritasX1/prevux/issues">Issue-Tracker</a>.</p>
+      </div>
+      <div class="download reveal d1">
+        <h3>Tastenkürzel</h3>
+        <div class="meta">Wie auf dem Mac – mit <kbd>Strg</kbd> statt <kbd>⌘</kbd> und <kbd>Alt</kbd> statt <kbd>⌥</kbd>.</div>
+        <table class="keys">
+          <tr><td>Markierungsleiste</td><td><kbd>Strg</kbd> <kbd>⇧</kbd> <kbd>A</kbd></td></tr>
+          <tr><td>Text hervorheben</td><td><kbd>Strg</kbd> <kbd>⇧</kbd> <kbd>H</kbd></td></tr>
+          <tr><td>Beschneiden</td><td><kbd>Strg</kbd> <kbd>K</kbd></td></tr>
+          <tr><td>Links / rechts drehen</td><td><kbd>Strg</kbd> <kbd>L</kbd> / <kbd>R</kbd></td></tr>
+          <tr><td>Originalgröße / ganze Seite</td><td><kbd>Strg</kbd> <kbd>0</kbd> / <kbd>9</kbd></td></tr>
+          <tr><td>Miniaturen / Inhalt</td><td><kbd>Strg</kbd> <kbd>Alt</kbd> <kbd>2</kbd> / <kbd>3</kbd></td></tr>
+          <tr><td>Lesezeichen</td><td><kbd>Strg</kbd> <kbd>D</kbd></td></tr>
+          <tr><td>Diashow</td><td><kbd>Strg</kbd> <kbd>⇧</kbd> <kbd>F</kbd></td></tr>
+          <tr><td>Suchen</td><td><kbd>Strg</kbd> <kbd>F</kbd></td></tr>
+          <tr><td>Alle Kürzel</td><td><kbd>Strg</kbd> <kbd>?</kbd></td></tr>
+        </table>
+      </div>
     </div>
+    <p class="center reveal" style="margin-top: 50px; font-size: 19px; font-weight: 600">Entwickelt von Olaf Winkler in Schleswig-Holstein.</p>
+    <p class="center" style="margin-top: 10px; color: var(--muted); font-size: 15px">Quelltext und alle Versionen auf <a href="https://github.com/veritasX1/prevux">GitHub</a> · gemeinfrei unter <a href="https://creativecommons.org/publicdomain/zero/1.0/deed.de">CC0 1.0</a></p>
   </div>
 </section>
+
+</main>
 
 <footer>
+  <div class="wrap made">
+    <img src="prevux.svg" alt="" width="34" height="34">
+    <p><b>Entwickelt in Schleswig-Holstein.</b><br>Von Olaf Winkler – zwischen Nord- und Ostsee.</p>
+  </div>
   <div class="wrap cols">
     <div>
       <h4>Prevux</h4>
-      <p>Ein Bild- und PDF-Betrachter für Linux nach dem Vorbild von Vorschau auf dem Mac. Ein privates, nichtkommerzielles Projekt von Olaf Winkler.</p>
-      <p>Quellcode auf <a href="https://github.com/veritasX1/prevux">GitHub</a>, gemeinfrei unter <a href="https://creativecommons.org/publicdomain/zero/1.0/deed.de">CC0 1.0</a>.</p>
+      <p>Ein Bild- und PDF-Programm für Linux nach dem Vorbild von Vorschau auf dem Mac. Ein privates, nichtkommerzielles Projekt von Olaf Winkler.</p>
+      <p>Quellcode auf <a href="https://github.com/veritasX1/prevux">GitHub</a>, gemeinfrei unter <a href="https://creativecommons.org/publicdomain/zero/1.0/deed.de">CC0 1.0</a>. PyMuPDF steht unter der AGPL.</p>
     </div>
     <div>
       <h4>Datenschutz dieser Seite</h4>
-      <p>Diese Seite setzt keine Cookies, lädt keine Inhalte von fremden Servern und verwendet kein JavaScript. Der Webserver speichert für diese Seite keine Zugriffsprotokolle. Es werden keine personenbezogenen Daten erhoben.</p>
+      <p>Keine Cookies, keine Inhalte von fremden Servern, keine Zugriffsprotokolle. Das JavaScript dieser Seite läuft nur in deinem Browser und sendet nichts.</p>
     </div>
     <div>
       <h4>Hinweis</h4>
-      <p>Prevux ist ein unabhängiges Projekt und steht in keiner Verbindung zu Apple Inc. macOS und Vorschau (Preview) sind Marken von Apple Inc.</p>
+      <p>Prevux ist ein unabhängiges Projekt und steht in keiner Verbindung zu Apple Inc. macOS und Vorschau (Preview) sind Marken von Apple Inc. Alle Bilder zeigen eigens erstellte Beispieldokumente.</p>
     </div>
   </div>
 </footer>
 
+<script src="site.js"></script>
 </body>
 </html>
