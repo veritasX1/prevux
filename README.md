@@ -7,7 +7,7 @@
 <p align="center">
   <b>The image and PDF viewer for people coming from the Mac.</b><br>
   Version 1.0 · GTK 4 / libadwaita · works completely offline<br>
-  <a href="https://prevux.goip.de">prevux.goip.de</a>
+  <a href="https://lisoft.goip.de/prevux/">lisoft.goip.de/prevux</a>
 </p>
 
 ![Prevux with the markup toolbar](docs/screenshots/prevux-markup.png)
