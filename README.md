@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>The image and PDF viewer for people coming from the Mac.</b><br>
-  Version 0.9 beta · GTK 4 / libadwaita · works completely offline<br>
+  Version 1.0 · GTK 4 / libadwaita · works completely offline<br>
   <a href="https://prevux.goip.de">prevux.goip.de</a>
 </p>
 
@@ -75,12 +75,11 @@ Prevux is built to keep your documents yours:
 | ![Filling in a PDF form](docs/screenshots/prevux-forms.png) | ![Table of contents](docs/screenshots/prevux-contents.png) |
 | Filling in PDF forms | Table of contents |
 
-## Status: 0.9 beta
+## Status: 1.0
 
-Prevux is feature-complete for everyday use and is already used as the
-default viewer on its developer's machine. It is called a beta because the
-user interface is currently maintained in **German only**. English, French
-and Russian translations are planned for version 1.0.
+Prevux is feature-complete for everyday use and is the default viewer for
+images and PDFs on its developer's machine. The user interface is currently
+in **German**; English, French and Russian translations are planned.
 
 Please report problems and ideas in the
 [issue tracker](https://github.com/veritasX1/prevux/issues).
