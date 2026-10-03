@@ -167,7 +167,7 @@ class PrevuxApplication(Adw.Application):
             application_name="Prevux",
             application_icon=self.get_application_id(),
             developer_name="Olaf Winkler",
-            version="0.9 Beta",
+            version="1.0",
             website="https://github.com/veritasX1/prevux",
             comments=_("A lightweight image and PDF viewer for Linux, inspired by macOS Preview."),
             license_type=Gtk.License.CUSTOM,
