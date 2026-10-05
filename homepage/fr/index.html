@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Prevux – Images et PDF comme vous les connaissez sur Mac</title>
+<meta name="description" content="Prevux est un programme d’images et de PDF pour Linux inspiré d’Aperçu sur Mac : afficher, annoter, signer, remplir. Open source, sans compte et totalement sans connexion Internet.">
+<link rel="icon" href="../prevux.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../site.css">
+<!--lang--><link rel="alternate" hreflang="de" href="https://lisoft.goip.de/prevux/"><link rel="alternate" hreflang="en" href="https://lisoft.goip.de/prevux/en/"><link rel="alternate" hreflang="fr" href="https://lisoft.goip.de/prevux/fr/">
+<style>
+.apps .wrap { position: relative; }
+.lang-switch { position: absolute; right: 22px; display: flex; gap: 12px; }
+.lang-switch a[aria-current], .lang-foot a[aria-current] { color: #fff; opacity: 1; font-weight: 600; }
+.lang-foot { display: flex; gap: 14px; justify-content: center; padding-top: 18px; font-size: 13px; }
+.lang-foot a[aria-current] { color: inherit; }
+@media (max-width: 900px) { .lang-switch { display: none; } }
+</style><!--/lang-->
+</head>
+<body>
+
+<div class="apps">
+  <div class="wrap">
+    <a href="https://lisoft.goip.de/linotes/fr/">LiNotes</a>
+    <a href="https://lisoft.goip.de/prevux/fr/" aria-current="page">Prevux</a>
+    <a href="https://lisoft.goip.de/liboard/fr/">LiBoard</a>
+    <a href="https://lisoft.goip.de/licida/fr/">LiCida</a>
+    <a href="https://lisoft.goip.de/lical/fr/">LiCal</a>
+    <a href="https://lisoft.goip.de/lidio/fr/">LiDio</a>
+  <!--lang--><span class="lang-switch"><a href="../" hreflang="de" lang="de">DE</a><a href="../en/" hreflang="en" lang="en">EN</a><a href="./" hreflang="fr" lang="fr" aria-current="true">FR</a></span><!--/lang-->
+  </div>
+</div>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="#"><img src="../prevux.svg" alt="">Prevux</a>
+    <nav class="links">
+      <a href="#markieren">Annotation</a>
+      <a href="#seitenleiste">Barre latérale</a>
+      <a href="#neu">Fonctions</a>
+      <a href="#datenschutz">Confidentialité</a>
+      <a href="https://github.com/veritasX1/prevux">GitHub</a>
+    </nav>
+    <a class="btn small cta" href="#installieren">Installer</a>
+  </div>
+</header>
+
+<main>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="wrap">
+    <img class="app-icon" src="../prevux.svg" alt="Icône de Prevux" width="120" height="120">
+    <span class="badge reveal">Prevux 1.0 – avec onglets, barre d’outils en verre, diaporama et bien plus</span>
+    <h1 class="display reveal d1">Images et PDF.<br><span class="gradient-text">Comme sur Mac.</span></h1>
+    <p class="lead reveal d2">Afficher, annoter, signer et remplir – aussi familier qu’Aperçu sur Mac.<br>Désormais sous Linux. Gratuit, open source et totalement sans Internet.</p>
+    <div class="actions reveal d3">
+      <a class="btn" href="#installieren">Installer gratuitement</a>
+      <a class="btn ghost" href="#neu">Toutes les fonctions</a>
+    </div>
+    <div class="hero-stage reveal">
+      <div class="window">
+        <img class="zoomable" src="../img/hero.webp" data-light="img/hero.webp" data-dark="img/hero-dark.webp" width="1280" height="800" alt="Prevux avec trois documents en onglets : un guide de randonnée en PDF avec la barre d’annotation, surligneur, cercle, flèche et légende sur une photo">
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="wrap center" style="padding-top: 40px; max-width: 1000px">
+  <p class="headline reveal">Un déménagement.<br><span style="color: var(--muted)">Pas un nouveau départ.</span></p>
+  <p class="lead reveal d1">Prevux reprend l’organisation, les outils, les raccourcis clavier et même les noms de menus d’Aperçu – « Fichier », « Enregistrer », « Rogner ». Si vous venez du Mac, vous trouverez tout là où votre main le cherche. Et si vous n’avez jamais utilisé Aperçu, vous obtenez tout simplement un programme calme et ordonné pour les images et les PDF.</p>
+</section>
+
+<!-- STORY -->
+<section id="markieren" class="alt">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow">Modifier</p>
+      <h2 class="headline">Montrer<br>l’essentiel.</h2>
+      <p class="lead">Annoter, remplir, signer, ajuster – sans second programme.</p>
+    </div>
+    <div class="story">
+      <div class="steps">
+        <div class="step">
+          <h3>Formes, flèches, texte.<br>Et une loupe.</h3>
+          <p>Sur les photos comme sur les PDF. La loupe agrandit un endroit et montre d’un trait d’où il vient. Tout reste modifiable, même après l’enregistrement.</p>
+          <div class="mobile-shot window"><img src="../img/image.webp" data-light="img/image.webp" data-dark="img/image-dark.webp" alt="Photo avec cercle, flèche, légende et loupe" loading="lazy"></div>
+        </div>
+        <div class="step">
+          <h3>Des croquis<br>qui deviennent beaux.</h3>
+          <p>Un cercle tordu devient un cercle net, une flèche tremblante une flèche droite. Avec une tablette graphique ou un stylet, le trait s’épaissit à mesure que vous appuyez.</p>
+          <div class="mobile-shot window"><img src="../img/hero.webp" data-light="img/hero.webp" data-dark="img/hero-dark.webp" alt="PDF avec surligneur, cercle et flèche" loading="lazy"></div>
+        </div>
+        <div class="step">
+          <h3>La page continue<br>sous la barre.</h3>
+          <p>La barre d’outils est en verre : en faisant défiler, le document transparaît doucement en dessous. Le zoom et le défilement glissent en douceur vers l’endroit où se trouve votre pointeur. Vous préférez plus sobre ? « Réduire la transparence » dans les réglages.</p>
+          <div class="mobile-shot window"><img src="../img/glass.webp" data-light="img/glass.webp" data-dark="img/glass-dark.webp" alt="Une photo défile sous la barre d’outils semi-transparente" loading="lazy"></div>
+        </div>
+        <div class="step" id="formulare">
+          <h3>Remplir. Signer.<br>Terminé.</h3>
+          <p>Champs, cases à cocher et listes directement dans le PDF, avec Tab pour passer au champ suivant. Vous dessinez votre signature – ou vous la photographiez sur papier, et Prevux en fait des traits nets.</p>
+          <div class="mobile-shot window"><img src="../img/forms.webp" data-light="img/forms.webp" data-dark="img/forms-dark.webp" alt="Formulaire rempli avec signature" loading="lazy"></div>
+        </div>
+        <div class="step">
+          <h3>Beaucoup d’images.<br>Une seule taille.</h3>
+          <p>Sélectionnez plusieurs images et ajustez-les ensemble : à des formats courants, en pixels, pourcentage ou centimètres – avec ou sans rééchantillonnage.</p>
+          <div class="mobile-shot window"><img src="../img/resize.webp" data-light="img/resize.webp" data-dark="img/resize-dark.webp" alt="Ajuster la taille de trois images à la fois" loading="lazy"></div>
+        </div>
+      </div>
+      <div class="stage">
+        <div class="frames">
+          <div class="window"><img class="zoomable" src="../img/image.webp" data-light="img/image.webp" data-dark="img/image-dark.webp" alt="Photo avec cercle, flèche, légende et loupe" loading="lazy"></div>
+          <div class="window"><img class="zoomable" src="../img/hero.webp" data-light="img/hero.webp" data-dark="img/hero-dark.webp" alt="PDF avec surligneur, cercle et flèche" loading="lazy"></div>
+          <div class="window"><img class="zoomable" src="../img/glass.webp" data-light="img/glass.webp" data-dark="img/glass-dark.webp" alt="Barre d’outils en verre" loading="lazy"></div>
+          <div class="window"><img class="zoomable" src="../img/forms.webp" data-light="img/forms.webp" data-dark="img/forms-dark.webp" alt="Formulaire rempli avec signature" loading="lazy"></div>
+          <div class="window"><img class="zoomable" src="../img/resize.webp" data-light="img/resize.webp" data-dark="img/resize-dark.webp" alt="Ajuster la taille" loading="lazy"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SIDEBAR SWITCHER -->
+<section id="seitenleiste">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow">Barre latérale</p>
+      <h2 class="headline">Toujours savoir<br>où vous êtes.</h2>
+      <p class="lead">Vignettes, table des matières, signets et résultats de recherche – un clic et vous êtes à la bonne page.</p>
+    </div>
+    <div class="center reveal">
+      <div class="segmented" data-showcase="#side-showcase">
+        <button class="on" data-win="img/hero.webp|img/hero-dark.webp" data-caption="Mehrere Dateien auf einmal geöffnet? Die Seitenleiste zeigt sie alle. Seiten ziehst du per Maus an eine neue Stelle – sogar von einem PDF ins andere.">Vignettes</button>
+        <button data-win="img/contents.webp|img/contents-dark.webp" data-caption="Das Inhaltsverzeichnis des PDFs, mit Seitenzahlen. Lange Handbücher werden so übersichtlich.">Table des matières</button>
+        <button data-win="img/search.webp|img/search-dark.webp" data-caption="Jeder Treffer mit dem Satz drumherum. Dank Live Text auch in Fotos und eingescannten Seiten – erkannt auf deinem Rechner.">Rechercher</button>
+      </div>
+    </div>
+    <div class="showcase duo-wrap reveal" id="side-showcase">
+      <div class="window"><img class="zoomable" data-slot="win" src="../img/hero.webp" data-light="img/hero.webp" data-dark="img/hero-dark.webp" alt="Barre latérale de Prevux" loading="lazy"></div>
+      <p class="caption" data-slot="caption">Plusieurs fichiers ouverts à la fois ? La barre latérale les affiche tous. Faites glisser les pages à un nouvel endroit – même d’un PDF à un autre.</p>
+    </div>
+  </div>
+</section>
+
+<!-- TILES -->
+<section id="neu" class="alt">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow">Fonctions</p>
+      <h2 class="headline">Et bien plus encore.</h2>
+      <p class="lead">Les petits détails qui rendent Aperçu si utile – reconstruits pièce par pièce.</p>
+    </div>
+    <div class="tiles">
+      <div class="tile reveal"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="2.5"/><path d="M3 10h18M8 7V4.5h8V7"/></svg></div><h3>Onglets</h3><p>Plusieurs fichiers dans une fenêtre. <kbd>Ctrl</kbd> <kbd>Tab</kbd> passe au suivant, et un onglet peut être glissé dans sa propre fenêtre.</p></div>
+      <div class="tile reveal d1"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3.5h10v17l-5-3.6-5 3.6z"/></svg></div><h3>Signets</h3><p>Mémorisez les pages importantes avec <kbd>Ctrl</kbd> <kbd>D</kbd> – elles restent même après la fermeture du fichier.</p></div>
+      <div class="tile reveal d2"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M10 8v4l3.5-2zM8 20h8M12 16v4"/></svg></div><h3>Diaporama</h3><p>Afficher images et pages en plein écran – flèches pour avancer, Échap pour revenir.</p></div>
+      <div class="tile reveal"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 1 0 2.3-5.6"/><path d="M4 4v3.5h3.5M12 8v4.5l3 2"/></svg></div><h3>Versions</h3><p>Chaque enregistrement crée une version. « Revenir à … » restaure un état antérieur.</p></div>
+      <div class="tile reveal d1"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="11" height="11" rx="1.5"/><path d="M14 10h7v11H10v-7M17 17l-4-4M13 16v-3h3"/></svg></div><h3>Ajuster la taille</h3><p>Une image ou plusieurs à la fois : à des formats courants, en pixels, pourcentage ou centimètres.</p></div>
+      <div class="tile reveal d2"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18l6-6 3 3 3-4 4 7z"/><circle cx="8" cy="7" r="2"/><path d="M14 4l6 6M20 4l-6 6" opacity=".55"/></svg></div><h3>Supprimer l’arrière-plan</h3><p>Un clic et le sujet est détouré – à réutiliser en PNG avec transparence.</p></div>
+      <div class="tile reveal"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="9" width="18" height="10" rx="2"/><path d="M7 9V5h10v4M7 14h10"/></svg></div><h3>Scanner et appareil photo</h3><p>« Importer depuis le scanner » – aussi par le réseau et avec chargeur de documents directement en PDF. Ou prenez une photo avec l’appareil photo.</p></div>
+      <div class="tile reveal d1"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor" opacity=".35"/></svg></div><h3>Profils de couleur</h3><p>Attribuer un profil et épreuvage écran : voyez à l’avance le rendu de votre image à l’impression.</p></div>
+      <div class="tile reveal d2"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg></div><h3>Verrouiller un fichier</h3><p>Les fichiers verrouillés ne peuvent pas être modifiés par erreur. Dupliquer, renommer et déplacer directement depuis le titre.</p></div>
+      <div class="tile reveal wide"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5h8l4 4v13H6z"/><path d="M14 3.5v4h4M9 12h6M9 15.5h6M9 19h3"/></svg></div><h3>Ouvre plus que des images et des PDF</h3><p>Prevux ouvre le Markdown, les fichiers texte, les pages HTML et les livres numériques comme des documents soigneusement mis en page – pour lire, annoter et enregistrer en PDF. La barre latérale affiche les GIF animés image par image.</p></div>
+      <div class="tile reveal d1"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-6.5-6-6.5-11a6.5 6.5 0 0 1 13 0c0 5-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/></svg></div><h3>Lieu</h3><p>Montre où une photo a été prise – et supprime le lieu sur demande avant de la partager.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- PRIVACY -->
+<section id="datenschutz">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow">Confidentialité</p>
+      <h2 class="headline">Vos documents<br>restent les vôtres.</h2>
+      <p class="lead">Contrats, pièces d’identité, relevés bancaires, courriers médicaux : ce qu’on ouvre dans un programme PDF est souvent ce qu’il y a de plus privé. C’est pourquoi, avec Prevux, rien ne quitte votre ordinateur.</p>
+    </div>
+    <div class="facts">
+      <div class="reveal"><div class="num gradient-text">0</div><div class="lbl">connexion à Internet</div></div>
+      <div class="reveal d1"><div class="num gradient-text">0</div><div class="lbl">comptes, abonnements et clouds</div></div>
+      <div class="reveal d2"><div class="num gradient-text">0</div><div class="lbl">traqueurs, statistiques, publicité</div></div>
+      <div class="reveal d3"><div class="num gradient-text">100 %</div><div class="lbl">code source ouvert</div></div>
+    </div>
+    <div class="tiles" style="margin-top: 60px">
+      <div class="tile reveal d2"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="9" width="18" height="6" rx="1.5" fill="currentColor"/><path d="M3 5h10M3 19h14"/></svg></div><h3>Caviarder, c’est supprimer</h3><p>Le texte, les graphiques et les pixels caviardés sont réellement supprimés du PDF à l’enregistrement – pas seulement recouverts d’une barre.</p></div>
+      <div class="tile reveal"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2M8 10h8M8 14h5"/></svg></div><h3>Live Text reste local</h3><p>La reconnaissance de texte dans les photos et les scans s’exécute sur votre ordinateur. Aucune image n’est envoyée nulle part.</p></div>
+      <div class="tile reveal d1"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg></div><h3>Ce site aussi</h3><p>Pas de cookies, ni polices ni services tiers, aucun journal d’accès. Le JavaScript de ce site s’exécute uniquement dans votre navigateur et n’envoie rien.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- INSTALL -->
+<section id="installieren" class="alt">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow">Installer</p>
+      <h2 class="headline">Lancez-vous. Gratuitement.</h2>
+      <p class="lead">Pour Ubuntu et les autres systèmes Linux avec GTK 4 et libadwaita 1.8 ou ultérieur.</p>
+    </div>
+    <div class="install">
+      <div class="download reveal">
+        <h3>Ubuntu</h3>
+        <div class="meta">Développé et testé sur Ubuntu 26.04 LTS</div>
+        <div class="terminal" data-copy="sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 python3-venv git
+git clone https://github.com/veritasX1/prevux.git
+cd prevux
+./install.sh"><div class="bar"><i></i><i></i><i></i><span>Terminal</span></div><pre><span class="p">$</span> sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 python3-venv git
+<span class="p">$</span> git clone https://github.com/veritasX1/prevux.git
+<span class="p">$</span> cd prevux
+<span class="p">$</span> ./install.sh</pre></div>
+        <p>Prevux apparaît ensuite dans le menu des applications et sous « Ouvrir avec ». Pour qu’il ouvre désormais tous les PDF et toutes les images :</p>
+        <div class="terminal" data-copy="xdg-mime default io.github.veritasx1.Prevux.desktop application/pdf image/png image/jpeg image/webp image/tiff image/gif image/bmp"><div class="bar"><i></i><i></i><i></i><span>Terminal</span></div><pre><span class="p">$</span> xdg-mime default io.github.veritasx1.Prevux.desktop application/pdf image/png image/jpeg image/webp image/tiff image/gif image/bmp</pre></div>
+        <p><b>En option :</b> <code class="inline">tesseract-ocr tesseract-ocr-fra</code> pour Live Text, <code class="inline">sane-utils</code> pour les scanners.</p>
+        <p class="note"><b>Version 1.0.</b> L’interface existe en allemand, anglais et français ; le russe est prévu. Bugs ou idées ? Bienvenus dans le <a href="https://github.com/veritasX1/prevux/issues">gestionnaire de tickets</a>.</p>
+      </div>
+      <div class="download reveal d1">
+        <h3>Raccourcis clavier</h3>
+        <div class="meta">Comme sur Mac – avec <kbd>Ctrl</kbd> au lieu de <kbd>⌘</kbd> et <kbd>Alt</kbd> au lieu de <kbd>⌥</kbd>.</div>
+        <table class="keys">
+          <tr><td>Barre d’annotation</td><td><kbd>Ctrl</kbd> <kbd>⇧</kbd> <kbd>A</kbd></td></tr>
+          <tr><td>Surligner le texte</td><td><kbd>Ctrl</kbd> <kbd>⇧</kbd> <kbd>H</kbd></td></tr>
+          <tr><td>Rogner</td><td><kbd>Ctrl</kbd> <kbd>K</kbd></td></tr>
+          <tr><td>Faire pivoter à gauche / à droite</td><td><kbd>Ctrl</kbd> <kbd>L</kbd> / <kbd>R</kbd></td></tr>
+          <tr><td>Taille réelle / taille ajustée</td><td><kbd>Ctrl</kbd> <kbd>0</kbd> / <kbd>9</kbd></td></tr>
+          <tr><td>Vignettes / table des matières</td><td><kbd>Ctrl</kbd> <kbd>Alt</kbd> <kbd>2</kbd> / <kbd>3</kbd></td></tr>
+          <tr><td>Signets</td><td><kbd>Ctrl</kbd> <kbd>D</kbd></td></tr>
+          <tr><td>Diaporama</td><td><kbd>Ctrl</kbd> <kbd>⇧</kbd> <kbd>F</kbd></td></tr>
+          <tr><td>Rechercher</td><td><kbd>Ctrl</kbd> <kbd>F</kbd></td></tr>
+          <tr><td>Tous les raccourcis</td><td><kbd>Ctrl</kbd> <kbd>?</kbd></td></tr>
+        </table>
+      </div>
+    </div>
+    <p class="center reveal" style="margin-top: 50px; font-size: 19px; font-weight: 600">Développé par Olaf Winkler dans le Schleswig-Holstein.</p>
+    <p class="center" style="margin-top: 10px; color: var(--muted); font-size: 15px">Code source et toutes les versions sur <a href="https://github.com/veritasX1/prevux">GitHub</a> · domaine public sous <a href="https://creativecommons.org/publicdomain/zero/1.0/deed.fr">CC0 1.0</a></p>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap made">
+    <img src="../prevux.svg" alt="" width="34" height="34">
+    <p><b>Développé dans le Schleswig-Holstein.</b><br>Par Olaf Winkler – entre mer du Nord et mer Baltique.</p>
+  </div>
+  <div class="wrap cols">
+    <div>
+      <h4>Prevux</h4>
+      <p>Un programme d’images et de PDF pour Linux inspiré d’Aperçu sur Mac. Un projet privé et non commercial d’Olaf Winkler.</p>
+      <p>Code source sur <a href="https://github.com/veritasX1/prevux">GitHub</a>, domaine public sous <a href="https://creativecommons.org/publicdomain/zero/1.0/deed.fr">CC0 1.0</a>. PyMuPDF est sous licence AGPL.</p>
+    </div>
+    <div>
+      <h4>Confidentialité de ce site</h4>
+      <p>Pas de cookies, aucun contenu de serveurs tiers, aucun journal d’accès. Le JavaScript de ce site s’exécute uniquement dans votre navigateur et n’envoie rien.</p>
+    </div>
+    <div>
+      <h4>Remarque</h4>
+      <p>Prevux est un projet indépendant, sans lien avec Apple Inc. macOS et Aperçu (Preview) sont des marques d’Apple Inc. Toutes les images montrent des documents d’exemple créés spécialement.</p>
+    </div>
+  </div>
+<!--lang--><div class="wrap lang-foot"><a href="../" hreflang="de" lang="de">DE</a><a href="../en/" hreflang="en" lang="en">EN</a><a href="./" hreflang="fr" lang="fr" aria-current="true">FR</a></div><!--/lang-->
+</footer>
+
+<script src="../site.js"></script>
+</body>
+</html>

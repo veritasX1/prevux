@@ -7,6 +7,25 @@
 <meta name="description" content="Prevux ist ein Bild- und PDF-Programm für Linux nach dem Vorbild von Vorschau auf dem Mac: ansehen, markieren, unterschreiben, ausfüllen. Quelloffen, ohne Konto und ganz ohne Internetverbindung.">
 <link rel="icon" href="prevux.svg" type="image/svg+xml">
 <link rel="stylesheet" href="site.css">
+<!--lang--><link rel="alternate" hreflang="de" href="https://lisoft.goip.de/prevux/"><link rel="alternate" hreflang="en" href="https://lisoft.goip.de/prevux/en/"><link rel="alternate" hreflang="fr" href="https://lisoft.goip.de/prevux/fr/">
+<style>
+.apps .wrap { position: relative; }
+.lang-switch { position: absolute; right: 22px; display: flex; gap: 12px; }
+.lang-switch a[aria-current], .lang-foot a[aria-current] { color: #fff; opacity: 1; font-weight: 600; }
+.lang-foot { display: flex; gap: 14px; justify-content: center; padding-top: 18px; font-size: 13px; }
+.lang-foot a[aria-current] { color: inherit; }
+@media (max-width: 900px) { .lang-switch { display: none; } }
+</style>
+<script>
+(function () {
+  try {
+    if (document.referrer.indexOf(location.origin) === 0) return;
+    var l = ((navigator.languages && navigator.languages[0]) || navigator.language || "").slice(0, 2).toLowerCase();
+    if (l === "de") return;
+    location.replace((l === "fr" ? "fr/" : "en/") + location.pathname.split("/").pop() + location.hash);
+  } catch (e) {}
+})();
+</script><!--/lang-->
 </head>
 <body>
 
@@ -18,6 +37,7 @@
     <a href="https://lisoft.goip.de/licida/">LiCida</a>
     <a href="https://lisoft.goip.de/lical/">LiCal</a>
     <a href="https://lisoft.goip.de/lidio/">LiDio</a>
+  <!--lang--><span class="lang-switch"><a href="./" hreflang="de" lang="de" aria-current="true">DE</a><a href="en/" hreflang="en" lang="en">EN</a><a href="fr/" hreflang="fr" lang="fr">FR</a></span><!--/lang-->
   </div>
 </div>
 
@@ -200,7 +220,7 @@ cd prevux
         <p>Danach steht Prevux im Anwendungsmenü und unter „Öffnen mit“. Soll es künftig alle PDFs und Bilder öffnen:</p>
         <div class="terminal" data-copy="xdg-mime default io.github.veritasx1.Prevux.desktop application/pdf image/png image/jpeg image/webp image/tiff image/gif image/bmp"><div class="bar"><i></i><i></i><i></i><span>Terminal</span></div><pre><span class="p">$</span> xdg-mime default io.github.veritasx1.Prevux.desktop application/pdf image/png image/jpeg image/webp image/tiff image/gif image/bmp</pre></div>
         <p><b>Optional:</b> <code class="inline">tesseract-ocr tesseract-ocr-deu</code> für Live Text, <code class="inline">sane-utils</code> für Scanner.</p>
-        <p class="note"><b>Version 1.0.</b> Die Oberfläche ist bisher auf Deutsch; Englisch, Französisch und Russisch sind geplant. Fehler oder Ideen? Gern im <a href="https://github.com/veritasX1/prevux/issues">Issue-Tracker</a>.</p>
+        <p class="note"><b>Version 1.0.</b> Die Oberfläche gibt es auf Deutsch, Englisch und Französisch; Russisch ist geplant. Fehler oder Ideen? Gern im <a href="https://github.com/veritasX1/prevux/issues">Issue-Tracker</a>.</p>
       </div>
       <div class="download reveal d1">
         <h3>Tastenkürzel</h3>
@@ -246,6 +266,7 @@ cd prevux
       <p>Prevux ist ein unabhängiges Projekt und steht in keiner Verbindung zu Apple Inc. macOS und Vorschau (Preview) sind Marken von Apple Inc. Alle Bilder zeigen eigens erstellte Beispieldokumente.</p>
     </div>
   </div>
+<!--lang--><div class="wrap lang-foot"><a href="./" hreflang="de" lang="de" aria-current="true">DE</a><a href="en/" hreflang="en" lang="en">EN</a><a href="fr/" hreflang="fr" lang="fr">FR</a></div><!--/lang-->
 </footer>
 
 <script src="site.js"></script>
