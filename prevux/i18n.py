@@ -4,8 +4,12 @@ Strings are written in English; German follows the wording of the German
 macOS Preview ("Vorschau") where possible, so switchers find things by name.
 """
 
+import json
 import locale
 import os
+from pathlib import Path
+
+from .i18n_fr import FRENCH
 
 
 GERMAN = {
@@ -403,10 +407,24 @@ GERMAN = {
     "Zoom Out": "Verkleinern",
     "Zoom to Fit": "Ganze Seite",
     "Zoom to Width": "Seitenbreite",
+    "Language": "Sprache",
+    "System": "System",
+    "Takes effect the next time Prevux starts.": "Gilt ab dem nächsten Start von Prevux.",
 }
 
 
+def _chosen():
+    """The language picked in Settings, empty for "like the system"."""
+    folder = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    try:
+        return json.loads((Path(folder) / "prevux" / "settings.json").read_text()).get("language") or ""
+    except (OSError, ValueError, AttributeError):
+        return ""
+
+
 def _language():
+    if _chosen():
+        return _chosen()
     for variable in ("LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"):
         value = os.environ.get(variable)
         if value:
@@ -417,7 +435,8 @@ def _language():
         return "en"
 
 
-TABLE = GERMAN if _language() == "de" else {}
+LANGUAGE = _language()
+TABLE = {"de": GERMAN, "fr": FRENCH}.get(LANGUAGE, {})
 
 
 def _(text):
@@ -425,6 +444,6 @@ def _(text):
 
 
 def decimal(value, digits=1):
-    """2,5 in German, 2.5 in English."""
+    """2,5 in German and French, 2.5 in English."""
     text = f"{value:.{digits}f}"
     return text.replace(".", ",") if TABLE else text

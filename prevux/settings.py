@@ -20,9 +20,10 @@ DEFAULTS = {
     "reopen_last_page": True,
     "pdf_view": "continuous",      # continuous, single, two
     "author": "",                  # name written into notes and markup
-    "open_in_tabs": False,
-    "reduce_transparency": False,  # solid toolbar instead of glass (Apple: Accessibility)         # files opened from outside join the window as tabs
+    "open_in_tabs": False,         # files opened from outside join the window as tabs
+    "reduce_transparency": False,  # solid toolbar instead of glass (Apple: Accessibility)
     "toolbar_hidden": [],          # toolbar items switched off (View → Customize Toolbar)
+    "language": "",                # empty: like the system; "de", "en", "fr"
 }
 TOOLBAR_ITEMS = [                  # (key, label) in the order they appear, left to right
     ("info", "Inspector"), ("zoom", "Zoom"), ("share", "Share"), ("highlight", "Highlight"),
@@ -156,6 +157,10 @@ class PreferencesDialog(Adw.PreferencesDialog):
                                active=get("reduce_transparency"))
         reduce.connect("notify::active", lambda r, _p: self.set("reduce_transparency", r.get_active()))
         group.add(reduce)
+        page.add(group)
+        group = Adw.PreferencesGroup(title=_("Language"), description=_("Takes effect the next time Prevux starts."))
+        group.add(self.choice("language", [("", _("System")), ("de", "Deutsch"), ("en", "English"), ("fr", "Français")],
+                              _("Language")))
         page.add(group)
         group = Adw.PreferencesGroup(title=_("Windows"))
         tabs = Adw.SwitchRow(title=_("Open documents in tabs"),
