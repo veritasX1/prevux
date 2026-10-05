@@ -78,8 +78,9 @@ Prevux is built to keep your documents yours:
 ## Status: 1.0
 
 Prevux is feature-complete for everyday use and is the default viewer for
-images and PDFs on its developer's machine. The user interface is currently
-in **German**; English, French and Russian translations are planned.
+images and PDFs on its developer's machine. The user interface speaks
+**English, German and French** – like the system, or chosen under
+Settings → General → Language. Russian is planned.
 
 Please report problems and ideas in the
 [issue tracker](https://github.com/veritasX1/prevux/issues).
