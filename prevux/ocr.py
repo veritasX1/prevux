@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import tempfile
 
-PREFERRED = ("deu", "eng")
+PREFERRED = ("deu", "eng", "fra")
 _languages = None
 
 
@@ -16,7 +16,7 @@ def available():
 
 
 def languages():
-    """German and English if installed (as many as there are), joined for Tesseract."""
+    """German, English and French if installed (as many as there are), joined for Tesseract."""
     global _languages
     if _languages is None:
         try:
